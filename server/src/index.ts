@@ -4,7 +4,7 @@ import cors from "cors";
 import { fetchFlightsByNumber, AeroDataBoxError } from "./aerodatabox.js";
 
 const app = express();
-const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
+const PORT = process.env.FLIGHT_SERVER_PORT ? Number(process.env.FLIGHT_SERVER_PORT) : 8787;
 const API_KEY = process.env.AERODATABOX_RAPIDAPI_KEY;
 
 app.use(cors());

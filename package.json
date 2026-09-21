@@ -1,0 +1,27 @@
+{
+  "name": "interactive-flight",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev --prefix server\" \"npm run dev --prefix web\"",
+    "dev:server": "npm run dev --prefix server",
+    "dev:web": "npm run dev --prefix web"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joewahy/interactive-flight.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/joewahy/interactive-flight/issues"
+  },
+  "homepage": "https://github.com/joewahy/interactive-flight#readme",
+  "private": true,
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}
