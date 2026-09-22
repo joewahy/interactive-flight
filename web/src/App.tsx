@@ -1,10 +1,13 @@
-import { useState } from "react";
-import FlightGlobe from "./components/FlightGlobe";
+import { lazy, Suspense, useState } from "react";
 import SearchBar from "./components/SearchBar";
 import DetailsPanel from "./components/DetailsPanel";
 import { fetchFlightByNumber, ApiError } from "./api";
 import type { FlightResult } from "./types";
 import "./App.css";
+
+// three.js is the bulk of the JS bundle; split it into its own chunk instead
+// of shipping it in the initial page load.
+const FlightGlobe = lazy(() => import("./components/FlightGlobe"));
 
 export default function App() {
   const [flights, setFlights] = useState<FlightResult[]>([]);
@@ -38,7 +41,9 @@ export default function App() {
 
   return (
     <div className="app">
-      <FlightGlobe flight={selectedFlight} onMarkerClick={() => setShowDetails(true)} />
+      <Suspense fallback={<div className="globe-loading">Loading globe...</div>}>
+        <FlightGlobe flight={selectedFlight} onMarkerClick={() => setShowDetails(true)} />
+      </Suspense>
 
       <div className="overlay top">
         <h1>Interactive Flight</h1>
