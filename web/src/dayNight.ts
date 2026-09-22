@@ -30,9 +30,20 @@ const FRAGMENT_SHADER = `
   void main() {
     vec3 sunDirView = normalize((viewMatrix * vec4(sunDirection, 0.0)).xyz);
     float intensity = dot(normalize(vNormal), sunDirView);
-    float blend = smoothstep(-0.15, 0.15, intensity);
+
+    // Wide, soft terminator band (roughly a 45-50deg-wide dawn/dusk zone)
+    // instead of a hard line splitting day and night.
+    float blend = smoothstep(-0.4, 0.4, intensity);
+
     vec4 dayColor = texture2D(dayTexture, vUv);
     vec4 nightColor = texture2D(nightTexture, vUv);
+
+    // The plain texture sample is near-black outside of city lights, since
+    // there's no lighting model in this shader to lift it. Add back a faint
+    // navy ambient tint so the night side reads as the familiar dark-blue
+    // globe rather than flat black.
+    nightColor.rgb += vec3(0.02, 0.05, 0.12);
+
     gl_FragColor = mix(nightColor, dayColor, blend);
   }
 `;
