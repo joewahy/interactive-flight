@@ -13,6 +13,31 @@ const MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.j
 const ROUTE_SOURCE_ID = "flight-route";
 const ROUTE_SAMPLE_POINTS = 128;
 
+// Below this zoom the plane marker stays at its base size; past it, it grows with
+// zoom (capped) so a close-up view doesn't leave it looking tiny against the map.
+const PLANE_ICON_BASE_SIZE = 30;
+const PLANE_ICON_BASE_ZOOM = 4;
+const PLANE_ICON_GROWTH_PER_ZOOM = 4;
+const PLANE_ICON_MAX_SIZE = 64;
+
+function planeIconSizeForZoom(zoom: number): number {
+  const grown = PLANE_ICON_BASE_SIZE + Math.max(0, zoom - PLANE_ICON_BASE_ZOOM) * PLANE_ICON_GROWTH_PER_ZOOM;
+  return Math.min(PLANE_ICON_MAX_SIZE, grown);
+}
+
+/** Resizes a live plane marker's wrapper and icon together (the tooltip's own % offset rides along). */
+function applyPlaneIconSize(marker: Marker | null, zoom: number) {
+  if (!marker) return;
+  const wrapper = marker.getElement();
+  const icon = wrapper.firstElementChild as HTMLElement | null;
+  if (!icon) return;
+  const size = `${planeIconSizeForZoom(zoom)}px`;
+  wrapper.style.width = size;
+  wrapper.style.height = size;
+  icon.style.width = size;
+  icon.style.height = size;
+}
+
 interface RouteFeatureCollection {
   type: "FeatureCollection";
   features: [{ type: "Feature"; properties: Record<string, never>; geometry: { type: "LineString"; coordinates: [number, number][] } }];
@@ -24,10 +49,7 @@ function emptyRoute(): RouteFeatureCollection {
 
 /**
  * Great-circle route through an ordered list of waypoints, as a lon/lat line with
- * longitude unwrapped so it doesn't jump across the antimeridian. Real flights don't
- * track the dep-arr great circle exactly (ATC routing, wind, approach vectoring), so
- * the live position is threaded in as a waypoint too, rather than connecting departure
- * straight to arrival and leaving the plane marker stranded off the drawn line.
+ * longitude unwrapped so it doesn't jump across the antimeridian.
  */
 function buildRouteCoordinates(waypoints: LatLon[]): [number, number][] {
   const coords: [number, number][] = [];
@@ -93,6 +115,7 @@ function buildPlaneMarkerElement(
   flightNumber: string,
   isLive: boolean,
   headingDeg: number,
+  size: number,
   onClick: () => void
 ): HTMLDivElement {
   // MapLibre's own Marker `rotation` option rotates the whole element it's given, which
@@ -102,15 +125,15 @@ function buildPlaneMarkerElement(
   const wrapper = document.createElement("div");
   wrapper.style.cssText = `
     position: relative;
-    width: 30px;
-    height: 30px;
+    width: ${size}px;
+    height: ${size}px;
     cursor: pointer;
   `;
 
   const icon = document.createElement("div");
   icon.style.cssText = `
-    width: 30px;
-    height: 30px;
+    width: ${size}px;
+    height: ${size}px;
     transform: rotate(${headingDeg}deg);
     filter: drop-shadow(0 0 6px ${isLive ? "#4fd1ff" : "rgba(255,255,255,0.5)"});
   `;
@@ -171,6 +194,9 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
       const pos = planePositionRef.current;
       if (pos) map.easeTo({ center: [pos.lon, pos.lat], duration: 300 });
     });
+
+    // Continuous, not zoomend-only, so the icon grows smoothly as the gesture happens.
+    map.on("zoom", () => applyPlaneIconSize(planeMarkerRef.current, map.getZoom()));
 
     map.on("load", () => {
       map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: emptyRoute() as GeoJSON.FeatureCollection });
@@ -237,11 +263,10 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
     const position = getFlightPosition(flight);
     planePositionRef.current = position ? { lon: position.lon, lat: position.lat } : null;
 
-    if (dep.lat !== null && dep.lon !== null && arr.lat !== null && arr.lon !== null) {
-      const waypoints: LatLon[] = [{ lat: dep.lat, lon: dep.lon }];
-      if (position) waypoints.push({ lat: position.lat, lon: position.lon });
-      waypoints.push({ lat: arr.lat, lon: arr.lon });
-      const coords = buildRouteCoordinates(waypoints);
+    // Only the flown portion (departure through the current position) is drawn, not
+    // the rest of the route to arrival — the plane hasn't flown that yet.
+    if (dep.lat !== null && dep.lon !== null && position) {
+      const coords = buildRouteCoordinates([{ lat: dep.lat, lon: dep.lon }, { lat: position.lat, lon: position.lon }]);
       routeSource?.setData({
         type: "FeatureCollection",
         features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } }],
@@ -251,7 +276,13 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
     }
     if (position) {
       const marker = new Marker({
-        element: buildPlaneMarkerElement(flight.number, position.isLive, position.headingDeg, () => onMarkerClickRef.current()),
+        element: buildPlaneMarkerElement(
+          flight.number,
+          position.isLive,
+          position.headingDeg,
+          planeIconSizeForZoom(map.getZoom()),
+          () => onMarkerClickRef.current()
+        ),
       })
         .setLngLat([position.lon, position.lat])
         .addTo(map);
