@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Globe, { type GlobeMethods } from "react-globe.gl";
 import type { FlightResult } from "../types";
 import { getFlightPosition } from "../flightPosition";
 import { createDayNightMaterial, getSubsolarPoint, latLngToUnitVector } from "../dayNight";
+import { fetchCountries, type CountryFeature } from "../countries";
 
 const BACKGROUND_IMAGE_URL = "//unpkg.com/three-globe/example/img/night-sky.png";
 const SUN_POSITION_UPDATE_MS = 60_000;
@@ -40,6 +41,12 @@ export default function FlightGlobe({ flight, onMarkerClick }: Props) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const hasFramedFlight = useRef<string | null>(null);
   const globeMaterial = useMemo(() => createDayNightMaterial(), []);
+  const [countries, setCountries] = useState<CountryFeature[]>([]);
+  const [hoveredCountry, setHoveredCountry] = useState<CountryFeature | null>(null);
+
+  useEffect(() => {
+    fetchCountries().then(setCountries);
+  }, []);
 
   useEffect(() => {
     function updateSunDirection() {
@@ -130,6 +137,29 @@ export default function FlightGlobe({ flight, onMarkerClick }: Props) {
       arcDashAnimateTime={2500}
       arcStroke={0.6}
       arcAltitudeAutoScale={0.35}
+      polygonsData={countries}
+      polygonGeoJsonGeometry="geometry"
+      polygonCapColor={(d) => (d === hoveredCountry ? "rgba(79, 209, 255, 0.25)" : "rgba(0, 0, 0, 0)")}
+      polygonSideColor={() => "rgba(0, 0, 0, 0)"}
+      polygonStrokeColor={() => "rgba(255, 255, 255, 0.55)"}
+      polygonAltitude={0.003}
+      polygonsTransitionDuration={200}
+      onPolygonHover={(polygon) => setHoveredCountry((polygon as CountryFeature) ?? null)}
+      polygonLabel={(d) => {
+        const country = d as CountryFeature;
+        const population = country.properties.POP_EST
+          ? `${(country.properties.POP_EST / 1_000_000).toFixed(1)}M people`
+          : "Population unknown";
+        return `
+          <div style="background: rgba(18,20,31,0.95); border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 6px; padding: 6px 10px; font-family: sans-serif; color: #e6e8ef;">
+            <div style="font-weight: 600; font-size: 13px;">${country.properties.NAME}</div>
+            <div style="font-size: 11px; color: #a7acbe; margin-top: 2px;">
+              ${country.properties.SUBREGION} &middot; ${population}
+            </div>
+          </div>
+        `;
+      }}
       pointsData={pointsData}
       pointLat="lat"
       pointLng="lng"
