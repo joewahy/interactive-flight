@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { FlightResult } from "../types";
 import { getFlightPosition } from "../flightPosition";
 import { greatCircleInterpolate, type LatLon } from "../geo";
+import { planeIconSvg } from "../planeIcon";
 
 // CARTO's free, no-key-required vector basemap. Its own tiles already carry
 // zoom-dependent country/state-province boundaries and labels, so there's no
@@ -48,15 +49,6 @@ function buildRouteCoordinates(waypoints: LatLon[]): [number, number][] {
   return coords;
 }
 
-function planeIconSvg(color: string): string {
-  return `
-    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2 L14 9 L21 13 L21 15 L14 13 L13 20 L16 22 L16 23 L12 22 L8 23 L8 22 L11 20 L10 13 L3 15 L3 13 L10 9 Z"
-        fill="${color}" stroke="rgba(0,0,0,0.4)" stroke-width="0.5" />
-    </svg>
-  `;
-}
-
 function buildTooltipElement(text: string): HTMLDivElement {
   const tooltip = document.createElement("div");
   tooltip.textContent = text;
@@ -97,26 +89,43 @@ function buildAirportMarkerElement(color: string, label: string): HTMLDivElement
   return content;
 }
 
-function buildPlaneMarkerElement(flightNumber: string, isLive: boolean, onClick: () => void): HTMLDivElement {
-  const content = document.createElement("div");
-  content.style.cssText = `
+function buildPlaneMarkerElement(
+  flightNumber: string,
+  isLive: boolean,
+  headingDeg: number,
+  onClick: () => void
+): HTMLDivElement {
+  // MapLibre's own Marker `rotation` option rotates the whole element it's given, which
+  // would carry the tooltip around with it (upside down at a southbound heading, sideways
+  // elsewhere). Only the icon should turn to show heading, so it gets its own child with
+  // the rotation applied directly, sitting next to an always-upright tooltip.
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = `
     position: relative;
     width: 30px;
     height: 30px;
     cursor: pointer;
+  `;
+
+  const icon = document.createElement("div");
+  icon.style.cssText = `
+    width: 30px;
+    height: 30px;
+    transform: rotate(${headingDeg}deg);
     filter: drop-shadow(0 0 6px ${isLive ? "#4fd1ff" : "rgba(255,255,255,0.5)"});
   `;
-  content.innerHTML = planeIconSvg(isLive ? "#4fd1ff" : "#c9cdda");
+  icon.innerHTML = planeIconSvg(isLive ? "#4fd1ff" : "#c9cdda");
+  wrapper.appendChild(icon);
 
   const tooltip = buildTooltipElement(flightNumber);
-  content.appendChild(tooltip);
-  content.addEventListener("mouseenter", () => (tooltip.style.opacity = "1"));
-  content.addEventListener("mouseleave", () => (tooltip.style.opacity = "0"));
-  content.addEventListener("click", (event) => {
+  wrapper.appendChild(tooltip);
+  wrapper.addEventListener("mouseenter", () => (tooltip.style.opacity = "1"));
+  wrapper.addEventListener("mouseleave", () => (tooltip.style.opacity = "0"));
+  wrapper.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
   });
-  return content;
+  return wrapper;
 }
 
 interface Props {
@@ -242,9 +251,7 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
     }
     if (position) {
       const marker = new Marker({
-        element: buildPlaneMarkerElement(flight.number, position.isLive, () => onMarkerClickRef.current()),
-        rotation: position.headingDeg,
-        rotationAlignment: "map",
+        element: buildPlaneMarkerElement(flight.number, position.isLive, position.headingDeg, () => onMarkerClickRef.current()),
       })
         .setLngLat([position.lon, position.lat])
         .addTo(map);

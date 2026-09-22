@@ -49,6 +49,17 @@
   pointer-events: auto;
 }
 
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .overlay.top {
   top: 24px;
   left: 24px;
@@ -57,13 +68,18 @@
   border: 1px solid var(--panel-border);
   border-radius: 12px;
   padding: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    0 16px 32px -12px rgba(0, 0, 0, 0.5);
+  animation: panel-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .overlay.top h1 {
   font-size: 20px;
-  font-weight: 600;
-  margin: 0 0 12px;
-  letter-spacing: 0.5px;
+  font-weight: 700;
+  margin: 0 0 14px;
+  letter-spacing: -0.01em;
 }
 
 .search-bar {
@@ -76,18 +92,27 @@
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--panel-border);
-  background: var(--panel-bg);
+  background: var(--bg);
   color: var(--text);
   font-size: 14px;
   outline: none;
+  caret-color: var(--accent);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .search-bar input:focus {
   border-color: var(--accent);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(79, 209, 255, 0.18);
 }
 
 .search-bar input::placeholder {
   color: var(--text-dim);
+}
+
+.search-bar input::selection {
+  background: var(--accent);
+  color: #0b0d14;
 }
 
 .search-bar button {
@@ -99,22 +124,42 @@
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  box-shadow: 0 2px 6px -1px rgba(79, 209, 255, 0.35);
+  transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.search-bar button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.search-bar button:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+  box-shadow: 0 1px 3px -1px rgba(79, 209, 255, 0.35);
+}
+
+.search-bar button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 .search-bar button:disabled {
   opacity: 0.6;
   cursor: default;
+  box-shadow: none;
 }
 
 .error-text {
   color: var(--accent-2);
   font-size: 13px;
+  font-weight: 500;
   margin: 10px 0 0;
 }
 
 .success-text {
   color: var(--success);
   font-size: 13px;
+  font-weight: 500;
   margin: 10px 0 0;
 }
 
@@ -127,18 +172,31 @@
 
 .flight-picker button {
   text-align: left;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-radius: 6px;
   border: 1px solid var(--panel-border);
-  background: var(--panel-bg);
+  background: var(--bg);
   color: var(--text-dim);
   font-size: 12px;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.flight-picker button:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.32);
+  color: var(--text);
+}
+
+.flight-picker button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .flight-picker button.active {
   color: var(--text);
   border-color: var(--accent);
+  background: rgba(79, 209, 255, 0.1);
 }
 
 .hint-pill {
@@ -161,7 +219,7 @@
   top: 0;
   right: 0;
   z-index: 10;
-  width: 340px;
+  width: 380px;
   height: 100vh;
   overflow-y: auto;
   background: var(--panel-bg);
@@ -169,8 +227,12 @@
   padding: 24px 20px;
 }
 
+.details-header {
+  margin: 0 0 16px;
+}
+
 .details-panel h3 {
-  margin: 0 0 4px;
+  margin: 0 0 8px;
   font-size: 18px;
   padding-right: 28px;
 }
@@ -184,7 +246,6 @@
   border: 1px solid var(--accent);
   border-radius: 999px;
   padding: 2px 10px;
-  margin: 0 0 20px;
 }
 
 .close-btn {
@@ -198,42 +259,159 @@
   cursor: pointer;
 }
 
-.movements {
+.aircraft-photo {
+  margin: 0 -20px 20px;
+  height: 160px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.aircraft-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.route-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.route-endpoint {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  margin-bottom: 20px;
+  flex: 1;
+  min-width: 0;
 }
 
-.movement-block h4 {
-  margin: 0 0 4px;
+.route-header .route-endpoint:last-child {
+  text-align: right;
+  align-items: flex-end;
+}
+
+.route-code {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.route-city {
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
   color: var(--text-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.airport-name {
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 500;
+.route-tz {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 1px;
 }
 
-.movement-block dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 12px;
-  margin: 0;
+.route-badge {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.route-badge svg {
+  width: 18px;
+  height: 18px;
+  transform: rotate(90deg);
+}
+
+.route-times {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.route-times-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.route-times-col.right {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.route-time-row {
+  display: flex;
+  gap: 8px;
   font-size: 13px;
 }
 
-.movement-block dt {
-  color: var(--text-dim);
+.route-times-col.right .route-time-row {
+  flex-direction: row-reverse;
 }
 
-.movement-block dd {
-  margin: 0;
-  text-align: right;
+.route-time-row .emphasis {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.route-meta {
+  font-size: 11px;
+  margin: 2px 0 0;
+}
+
+.route-progress {
+  margin-bottom: 20px;
+}
+
+.route-progress-track {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 14px 0 8px;
+}
+
+.route-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.route-progress-plane {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%) rotate(90deg);
+  filter: drop-shadow(0 0 4px rgba(79, 209, 255, 0.6));
+}
+
+.route-progress-plane svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.route-progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .section {

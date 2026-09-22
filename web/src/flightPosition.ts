@@ -32,16 +32,27 @@ function timeMs(iso: string | null): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-function progressFraction(flight: FlightResult): number {
-  const depTime = timeMs(flight.departure.revisedUtc ?? flight.departure.scheduledUtc);
-  const arrTime = timeMs(flight.arrival.revisedUtc ?? flight.arrival.scheduledUtc);
+export interface FlightProgress {
+  /** 0-1 fraction along the route; falls back to a per-status estimate without usable times. */
+  fraction: number;
+  depTimeMs: number | null;
+  arrTimeMs: number | null;
+}
 
-  if (depTime !== null && arrTime !== null && arrTime > depTime) {
-    const f = (Date.now() - depTime) / (arrTime - depTime);
-    return Math.min(1, Math.max(0, f));
+/**
+ * Shared by the map marker's position and the details panel's progress bar, so both
+ * always agree on where the flight is along its route.
+ */
+export function getFlightProgress(flight: FlightResult): FlightProgress {
+  const depTimeMs = timeMs(flight.departure.revisedUtc ?? flight.departure.scheduledUtc);
+  const arrTimeMs = timeMs(flight.arrival.revisedUtc ?? flight.arrival.scheduledUtc);
+
+  if (depTimeMs !== null && arrTimeMs !== null && arrTimeMs > depTimeMs) {
+    const f = (Date.now() - depTimeMs) / (arrTimeMs - depTimeMs);
+    return { fraction: Math.min(1, Math.max(0, f)), depTimeMs, arrTimeMs };
   }
 
-  return STATUS_FALLBACK_FRACTION[flight.status] ?? 0.5;
+  return { fraction: STATUS_FALLBACK_FRACTION[flight.status] ?? 0.5, depTimeMs, arrTimeMs };
 }
 
 export function getFlightPosition(flight: FlightResult): FlightPosition | null {
@@ -62,7 +73,7 @@ export function getFlightPosition(flight: FlightResult): FlightPosition | null {
 
   const start: LatLon = { lat: dep.lat, lon: dep.lon };
   const end: LatLon = { lat: arr.lat, lon: arr.lon };
-  const f = progressFraction(flight);
+  const f = getFlightProgress(flight).fraction;
   const point = greatCircleInterpolate(start, end, f);
 
   // Estimate heading using the local tangent of the route rather than the
