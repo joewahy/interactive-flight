@@ -1,6 +1,8 @@
 import * as THREE from "three";
 
-export const EARTH_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
+// The muted NASA "blue marble" texture read as too dark; this satellite-imagery-style
+// texture is brighter and more saturated (vivid ocean blue, punchier greens/tans).
+export const EARTH_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-day.jpg";
 
 // Same vertex shader as three-globe's default: normalMatrix/modelViewMatrix/projectionMatrix
 // are built-in Three.js uniforms, so the transformed normal already reflects however the
@@ -35,7 +37,7 @@ const FRAGMENT_SHADER = `
 
     // Same texture everywhere; night side is just dimmed, not swapped for a
     // different image, so the globe reads as one consistent color.
-    float brightness = mix(0.65, 1.0, lightFactor);
+    float brightness = mix(0.78, 1.0, lightFactor);
 
     vec4 color = texture2D(earthTexture, vUv);
     color.rgb *= brightness;
