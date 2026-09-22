@@ -14,6 +14,7 @@ export default function App() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
 
   const selectedFlight = flights[selectedIndex] ?? null;
@@ -21,6 +22,7 @@ export default function App() {
   async function handleSearch(flightNumber: string) {
     setLoading(true);
     setError(null);
+    setSuccess(null);
     setShowDetails(false);
     try {
       const results = await fetchFlightByNumber(flightNumber);
@@ -30,6 +32,11 @@ export default function App() {
       } else {
         setFlights(results);
         setSelectedIndex(0);
+        setSuccess(
+          results.length === 1
+            ? `Found flight ${results[0].number}.`
+            : `Found ${results.length} flights for ${flightNumber}.`
+        );
       }
     } catch (err) {
       setFlights([]);
@@ -49,6 +56,7 @@ export default function App() {
         <h1>Interactive Flight</h1>
         <SearchBar onSearch={handleSearch} loading={loading} />
         {error && <p className="error-text">{error}</p>}
+        {success && <p className="success-text">{success}</p>}
         {flights.length > 1 && (
           <div className="flight-picker">
             {flights.map((f, i) => (
