@@ -58,6 +58,10 @@
   border-color: var(--accent);
 }
 
+.search-bar input::placeholder {
+  color: var(--text-dim);
+}
+
 .search-bar button {
   padding: 10px 16px;
   border-radius: 8px;

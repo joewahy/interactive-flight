@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef } from "react";
 import Globe, { type GlobeMethods } from "react-globe.gl";
 import type { FlightResult } from "../types";
 import { getFlightPosition } from "../flightPosition";
+import { createDayNightMaterial, getSubsolarPoint, latLngToUnitVector } from "../dayNight";
 
-const GLOBE_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-night.jpg";
-const BUMP_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-topology.png";
 const BACKGROUND_IMAGE_URL = "//unpkg.com/three-globe/example/img/night-sky.png";
+const SUN_POSITION_UPDATE_MS = 60_000;
 
 interface AirportPoint {
   lat: number;
@@ -39,6 +39,18 @@ function planeIconSvg(color: string): string {
 export default function FlightGlobe({ flight, onMarkerClick }: Props) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const hasFramedFlight = useRef<string | null>(null);
+  const globeMaterial = useMemo(() => createDayNightMaterial(), []);
+
+  useEffect(() => {
+    function updateSunDirection() {
+      const { lat, lng } = getSubsolarPoint(new Date());
+      const uniform = globeMaterial.uniforms.sunDirection.value;
+      uniform.copy(latLngToUnitVector(lat, lng));
+    }
+    updateSunDirection();
+    const id = setInterval(updateSunDirection, SUN_POSITION_UPDATE_MS);
+    return () => clearInterval(id);
+  }, [globeMaterial]);
 
   const position = useMemo(() => (flight ? getFlightPosition(flight) : null), [flight]);
 
@@ -109,8 +121,7 @@ export default function FlightGlobe({ flight, onMarkerClick }: Props) {
   return (
     <Globe
       ref={globeRef}
-      globeImageUrl={GLOBE_IMAGE_URL}
-      bumpImageUrl={BUMP_IMAGE_URL}
+      globeMaterial={globeMaterial}
       backgroundImageUrl={BACKGROUND_IMAGE_URL}
       arcsData={arcsData}
       arcColor={() => ["rgba(79, 209, 255, 0.9)", "rgba(79, 209, 255, 0.2)"]}
