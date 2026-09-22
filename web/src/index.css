@@ -1,10 +1,10 @@
 :root {
   color-scheme: dark;
-  --bg: #05070d;
-  --panel-bg: #12141f;
-  --panel-border: rgba(255, 255, 255, 0.14);
-  --text: #e6e8ef;
-  --text-dim: #a7acbe;
+  --bg: #171b26;
+  --panel-bg: #262b3b;
+  --panel-border: rgba(255, 255, 255, 0.2);
+  --text: #f4f5f9;
+  --text-dim: #b9bed2;
   --accent: #4fd1ff;
   --accent-2: #ff6b6b;
   --success: #4ade80;

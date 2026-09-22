@@ -5,9 +5,9 @@ import { fetchFlightByNumber, ApiError } from "./api";
 import type { FlightResult } from "./types";
 import "./App.css";
 
-// three.js is the bulk of the JS bundle; split it into its own chunk instead
+// maplibre-gl is the bulk of the JS bundle; split it into its own chunk instead
 // of shipping it in the initial page load.
-const FlightGlobe = lazy(() => import("./components/FlightGlobe"));
+const FlightMap = lazy(() => import("./components/FlightMap"));
 
 export default function App() {
   const [flights, setFlights] = useState<FlightResult[]>([]);
@@ -48,8 +48,8 @@ export default function App() {
 
   return (
     <div className="app">
-      <Suspense fallback={<div className="globe-loading">Loading globe...</div>}>
-        <FlightGlobe flight={selectedFlight} onMarkerClick={() => setShowDetails(true)} />
+      <Suspense fallback={<div className="map-loading">Loading map...</div>}>
+        <FlightMap flight={selectedFlight} onMarkerClick={() => setShowDetails(true)} />
       </Suspense>
 
       <div className="overlay top">
@@ -78,7 +78,7 @@ export default function App() {
 
       {selectedFlight && !showDetails && (
         <button className="hint-pill" onClick={() => setShowDetails(true)}>
-          Click the plane on the globe for details
+          Click the plane on the map for details
         </button>
       )}
 
