@@ -4,9 +4,13 @@ import type { FlightResult } from "../types";
 import { getFlightPosition } from "../flightPosition";
 import { createDayNightMaterial, getSubsolarPoint, latLngToUnitVector } from "../dayNight";
 import { fetchCountries, type CountryFeature } from "../countries";
+import { CONTINENT_LABELS, OCEAN_LABELS, getFeatureCentroid, type GlobeLabel } from "../labels";
 
 const BACKGROUND_IMAGE_URL = "//unpkg.com/three-globe/example/img/night-sky.png";
 const SUN_POSITION_UPDATE_MS = 60_000;
+// Country name labels only show once zoomed in this far, so the default world
+// view isn't cluttered with 177 overlapping names.
+const COUNTRY_LABEL_ALTITUDE_THRESHOLD = 1.2;
 
 interface AirportPoint {
   lat: number;
@@ -43,9 +47,22 @@ export default function FlightGlobe({ flight, onMarkerClick }: Props) {
   const globeMaterial = useMemo(() => createDayNightMaterial(), []);
   const [countries, setCountries] = useState<CountryFeature[]>([]);
   const [hoveredCountry, setHoveredCountry] = useState<CountryFeature | null>(null);
+  const [zoomAltitude, setZoomAltitude] = useState(2.5);
 
   useEffect(() => {
     fetchCountries().then(setCountries);
+  }, []);
+
+  // Polling rather than listening for an OrbitControls 'change' event: react-globe.gl's
+  // wheel-zoom handler doesn't reliably dispatch that event, so this is simpler and robust
+  // regardless of which interaction path changed the camera.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const pov = globeRef.current?.pointOfView();
+      if (!pov) return;
+      setZoomAltitude((prev) => (Math.abs(prev - pov.altitude) > 0.02 ? pov.altitude : prev));
+    }, 250);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -100,6 +117,28 @@ export default function FlightGlobe({ flight, onMarkerClick }: Props) {
     return points;
   }, [flight]);
 
+  const countryLabels = useMemo<GlobeLabel[]>(() => {
+    return countries.flatMap((feature) => {
+      const centroid = getFeatureCentroid(feature.geometry);
+      if (!centroid) return [];
+      return [
+        {
+          lat: centroid.lat,
+          lng: centroid.lng,
+          text: feature.properties.NAME,
+          size: 0.45,
+          color: "rgba(255, 255, 255, 0.8)",
+        },
+      ];
+    });
+  }, [countries]);
+
+  const labelsData = useMemo<GlobeLabel[]>(() => {
+    const labels = [...CONTINENT_LABELS, ...OCEAN_LABELS];
+    if (zoomAltitude < COUNTRY_LABEL_ALTITUDE_THRESHOLD) labels.push(...countryLabels);
+    return labels;
+  }, [countryLabels, zoomAltitude]);
+
   const htmlElementsData = useMemo<PlaneMarker[]>(() => {
     if (!flight || !position) return [];
     return [
@@ -130,6 +169,15 @@ export default function FlightGlobe({ flight, onMarkerClick }: Props) {
       ref={globeRef}
       globeMaterial={globeMaterial}
       backgroundImageUrl={BACKGROUND_IMAGE_URL}
+      labelsData={labelsData}
+      labelLat="lat"
+      labelLng="lng"
+      labelText="text"
+      labelSize="size"
+      labelColor="color"
+      labelDotRadius={0}
+      labelAltitude={0.01}
+      labelsTransitionDuration={300}
       arcsData={arcsData}
       arcColor={() => ["rgba(79, 209, 255, 0.9)", "rgba(79, 209, 255, 0.2)"]}
       arcDashLength={0.4}
