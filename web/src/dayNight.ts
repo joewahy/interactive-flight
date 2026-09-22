@@ -1,7 +1,6 @@
 import * as THREE from "three";
 
-export const DAY_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
-export const NIGHT_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-night.jpg";
+export const EARTH_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
 
 // Same vertex shader as three-globe's default: normalMatrix/modelViewMatrix/projectionMatrix
 // are built-in Three.js uniforms, so the transformed normal already reflects however the
@@ -21,8 +20,7 @@ const VERTEX_SHADER = `
 // viewMatrix brings it into the same space as vNormal so the dot product is correct
 // regardless of camera/globe orientation.
 const FRAGMENT_SHADER = `
-  uniform sampler2D dayTexture;
-  uniform sampler2D nightTexture;
+  uniform sampler2D earthTexture;
   uniform vec3 sunDirection;
   varying vec3 vNormal;
   varying vec2 vUv;
@@ -33,32 +31,27 @@ const FRAGMENT_SHADER = `
 
     // Wide, soft terminator band (roughly a 45-50deg-wide dawn/dusk zone)
     // instead of a hard line splitting day and night.
-    float blend = smoothstep(-0.4, 0.4, intensity);
+    float lightFactor = smoothstep(-0.4, 0.4, intensity);
 
-    vec4 dayColor = texture2D(dayTexture, vUv);
-    vec4 nightColor = texture2D(nightTexture, vUv);
+    // Same texture everywhere; night side is just dimmed, not swapped for a
+    // different image, so the globe reads as one consistent color.
+    float brightness = mix(0.65, 1.0, lightFactor);
 
-    // The plain texture sample is near-black outside of city lights, since
-    // there's no lighting model in this shader to lift it. Add back a faint
-    // navy ambient tint so the night side reads as the familiar dark-blue
-    // globe rather than flat black.
-    nightColor.rgb += vec3(0.02, 0.05, 0.12);
+    vec4 color = texture2D(earthTexture, vUv);
+    color.rgb *= brightness;
 
-    gl_FragColor = mix(nightColor, dayColor, blend);
+    gl_FragColor = color;
   }
 `;
 
 export function createDayNightMaterial(): THREE.ShaderMaterial {
   const loader = new THREE.TextureLoader();
-  const dayTexture = loader.load(DAY_IMAGE_URL);
-  const nightTexture = loader.load(NIGHT_IMAGE_URL);
-  dayTexture.colorSpace = THREE.SRGBColorSpace;
-  nightTexture.colorSpace = THREE.SRGBColorSpace;
+  const earthTexture = loader.load(EARTH_IMAGE_URL);
+  earthTexture.colorSpace = THREE.SRGBColorSpace;
 
   return new THREE.ShaderMaterial({
     uniforms: {
-      dayTexture: { value: dayTexture },
-      nightTexture: { value: nightTexture },
+      earthTexture: { value: earthTexture },
       sunDirection: { value: new THREE.Vector3(1, 0, 0) },
     },
     vertexShader: VERTEX_SHADER,
