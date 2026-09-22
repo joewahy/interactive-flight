@@ -21,19 +21,29 @@ function emptyRoute(): RouteFeatureCollection {
   return { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } }] };
 }
 
-/** Great-circle route as a lon/lat line, with longitude unwrapped so it doesn't jump across the antimeridian. */
-function buildRouteCoordinates(start: LatLon, end: LatLon): [number, number][] {
+/**
+ * Great-circle route through an ordered list of waypoints, as a lon/lat line with
+ * longitude unwrapped so it doesn't jump across the antimeridian. Real flights don't
+ * track the dep-arr great circle exactly (ATC routing, wind, approach vectoring), so
+ * the live position is threaded in as a waypoint too, rather than connecting departure
+ * straight to arrival and leaving the plane marker stranded off the drawn line.
+ */
+function buildRouteCoordinates(waypoints: LatLon[]): [number, number][] {
   const coords: [number, number][] = [];
   let prevLon: number | null = null;
-  for (let i = 0; i <= ROUTE_SAMPLE_POINTS; i++) {
-    const { lat, lon } = greatCircleInterpolate(start, end, i / ROUTE_SAMPLE_POINTS);
-    let adjustedLon = lon;
-    if (prevLon !== null) {
-      while (adjustedLon - prevLon > 180) adjustedLon -= 360;
-      while (adjustedLon - prevLon < -180) adjustedLon += 360;
+  for (let seg = 0; seg < waypoints.length - 1; seg++) {
+    const start = waypoints[seg];
+    const end = waypoints[seg + 1];
+    for (let i = seg === 0 ? 0 : 1; i <= ROUTE_SAMPLE_POINTS; i++) {
+      const { lat, lon } = greatCircleInterpolate(start, end, i / ROUTE_SAMPLE_POINTS);
+      let adjustedLon = lon;
+      if (prevLon !== null) {
+        while (adjustedLon - prevLon > 180) adjustedLon -= 360;
+        while (adjustedLon - prevLon < -180) adjustedLon += 360;
+      }
+      coords.push([adjustedLon, lat]);
+      prevLon = adjustedLon;
     }
-    coords.push([adjustedLon, lat]);
-    prevLon = adjustedLon;
   }
   return coords;
 }
@@ -215,8 +225,14 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
       bounds.extend([arr.lon, arr.lat]);
     }
 
+    const position = getFlightPosition(flight);
+    planePositionRef.current = position ? { lon: position.lon, lat: position.lat } : null;
+
     if (dep.lat !== null && dep.lon !== null && arr.lat !== null && arr.lon !== null) {
-      const coords = buildRouteCoordinates({ lat: dep.lat, lon: dep.lon }, { lat: arr.lat, lon: arr.lon });
+      const waypoints: LatLon[] = [{ lat: dep.lat, lon: dep.lon }];
+      if (position) waypoints.push({ lat: position.lat, lon: position.lon });
+      waypoints.push({ lat: arr.lat, lon: arr.lon });
+      const coords = buildRouteCoordinates(waypoints);
       routeSource?.setData({
         type: "FeatureCollection",
         features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } }],
@@ -224,9 +240,6 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
     } else {
       routeSource?.setData(emptyRoute() as GeoJSON.FeatureCollection);
     }
-
-    const position = getFlightPosition(flight);
-    planePositionRef.current = position ? { lon: position.lon, lat: position.lat } : null;
     if (position) {
       const marker = new Marker({
         element: buildPlaneMarkerElement(flight.number, position.isLive, () => onMarkerClickRef.current()),
