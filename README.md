@@ -23,8 +23,8 @@ the status timeline, aircraft info, and departure/arrival weather.
 
 ## How it works
 
-- `web/` — Vite + React + TypeScript, globe rendered with `react-globe.gl`.
-- `server/` — Express proxy for AeroDataBox so the API key never reaches the
+- `web/` (Vite + React + TypeScript): globe rendered with `react-globe.gl`.
+- `server/` (Express): proxies AeroDataBox so the API key never reaches the
   browser. Weather is fetched client-side from Open-Meteo (no key required).
 - When a flight has no live ADS-B position reported, the plane's position on
   the globe is estimated by interpolating along the great-circle route based

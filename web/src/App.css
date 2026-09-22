@@ -120,7 +120,6 @@
   background: var(--panel-bg);
   border-left: 1px solid var(--panel-border);
   padding: 24px 20px;
-  backdrop-filter: blur(8px);
 }
 
 .details-panel h3 {

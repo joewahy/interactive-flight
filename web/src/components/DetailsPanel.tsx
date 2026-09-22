@@ -8,9 +8,9 @@ interface Props {
 }
 
 function formatTime(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "N/A";
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "N/A";
   return date.toLocaleString(undefined, {
     weekday: "short",
     hour: "2-digit",
@@ -122,9 +122,9 @@ export default function DetailsPanel({ flight, onClose }: Props) {
         <div className="section">
           <h4>Live position</h4>
           <p className="dim">
-            {flight.location.altitudeFt ? `${Math.round(flight.location.altitudeFt)} ft` : "—"}
-            {" · "}
-            {flight.location.groundSpeedKt ? `${Math.round(flight.location.groundSpeedKt)} kt` : "—"}
+            {flight.location.altitudeFt ? `${Math.round(flight.location.altitudeFt)} ft` : "N/A"}
+            {" / "}
+            {flight.location.groundSpeedKt ? `${Math.round(flight.location.groundSpeedKt)} kt` : "N/A"}
           </p>
         </div>
       )}
