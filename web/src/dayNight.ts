@@ -1,8 +1,9 @@
 import * as THREE from "three";
 
-// The muted NASA "blue marble" texture read as too dark; this satellite-imagery-style
-// texture is brighter and more saturated (vivid ocean blue, punchier greens/tans).
-export const EARTH_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-day.jpg";
+// 4096x2048 - noticeably sharper up close than the "earth-day.jpg" alternative (1600x800).
+// It's more muted/naturally toned than that texture, so the shader below re-grades it
+// (brightness + saturation) to keep the vivid look while gaining the extra resolution.
+export const EARTH_IMAGE_URL = "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
 
 // Same vertex shader as three-globe's default: normalMatrix/modelViewMatrix/projectionMatrix
 // are built-in Three.js uniforms, so the transformed normal already reflects however the
@@ -40,7 +41,12 @@ const FRAGMENT_SHADER = `
     float brightness = mix(0.78, 1.0, lightFactor);
 
     vec4 color = texture2D(earthTexture, vUv);
-    color.rgb *= brightness;
+
+    // Re-grade the source texture's more muted natural tone toward the vivid
+    // satellite-imagery look: boost saturation, then brightness.
+    float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    color.rgb = mix(vec3(gray), color.rgb, 1.35);
+    color.rgb *= brightness * 1.15;
 
     gl_FragColor = color;
   }
@@ -50,6 +56,9 @@ export function createDayNightMaterial(): THREE.ShaderMaterial {
   const loader = new THREE.TextureLoader();
   const earthTexture = loader.load(EARTH_IMAGE_URL);
   earthTexture.colorSpace = THREE.SRGBColorSpace;
+  // Sharper sampling at the glancing angles near the globe's horizon; drivers
+  // silently clamp this to whatever the hardware actually supports.
+  earthTexture.anisotropy = 16;
 
   return new THREE.ShaderMaterial({
     uniforms: {
