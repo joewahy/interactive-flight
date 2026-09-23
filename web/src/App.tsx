@@ -9,6 +9,10 @@ import "./App.css";
 // of shipping it in the initial page load.
 const FlightMap = lazy(() => import("./components/FlightMap"));
 
+// Matches .details-panel's width and the breakpoint where it goes full-screen (App.css).
+const DETAILS_PANEL_WIDTH = 380;
+const FULLSCREEN_PANEL_QUERY = "(max-width: 520px)";
+
 export default function App() {
   const [flights, setFlights] = useState<FlightResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -32,6 +36,8 @@ export default function App() {
       } else {
         setFlights(results);
         setSelectedIndex(0);
+        // On phones the panel covers the whole map, so leave it to the user to open.
+        setShowDetails(!window.matchMedia(FULLSCREEN_PANEL_QUERY).matches);
         setSuccess(
           results.length === 1
             ? `Found flight ${results[0].number}.`
@@ -49,7 +55,11 @@ export default function App() {
   return (
     <div className="app">
       <Suspense fallback={<div className="map-loading">Loading map...</div>}>
-        <FlightMap flight={selectedFlight} onMarkerClick={() => setShowDetails(true)} />
+        <FlightMap
+          flight={selectedFlight}
+          rightInset={showDetails ? DETAILS_PANEL_WIDTH : 0}
+          onMarkerClick={() => setShowDetails(true)}
+        />
       </Suspense>
 
       <div className="overlay top">
@@ -63,10 +73,7 @@ export default function App() {
               <button
                 key={`${f.number}-${f.departure.scheduledUtc ?? i}`}
                 className={i === selectedIndex ? "active" : ""}
-                onClick={() => {
-                  setSelectedIndex(i);
-                  setShowDetails(false);
-                }}
+                onClick={() => setSelectedIndex(i)}
               >
                 {f.departure.airport.iata ?? "?"} → {f.arrival.airport.iata ?? "?"} ·{" "}
                 {f.departure.scheduledLocal?.slice(0, 10) ?? "unknown date"}

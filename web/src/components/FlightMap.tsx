@@ -151,10 +151,12 @@ function buildPlaneMarkerElement(
 
 interface Props {
   flight: FlightResult | null;
+  /** Width of any panel covering the map's right edge, kept clear when framing the route. */
+  rightInset: number;
   onMarkerClick: () => void;
 }
 
-export default function FlightMap({ flight, onMarkerClick }: Props) {
+export default function FlightMap({ flight, rightInset, onMarkerClick }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const loadedRef = useRef(false);
@@ -163,6 +165,8 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
   const hasFramedFlight = useRef<string | null>(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
+  const rightInsetRef = useRef(rightInset);
+  rightInsetRef.current = rightInset;
   // Current plane position, kept centered whenever the user zooms (see the
   // "zoomend" handler below) so tracking a flight doesn't require re-finding
   // the plane after every zoom step.
@@ -291,7 +295,11 @@ export default function FlightMap({ flight, onMarkerClick }: Props) {
     if (hasFramedFlight.current !== flight.number && !bounds.isEmpty()) {
       hasFramedFlight.current = flight.number;
       suppressAutoCenterRef.current = true;
-      map.fitBounds(bounds, { padding: 80, maxZoom: 6, duration: 1200 });
+      map.fitBounds(bounds, {
+        padding: { top: 80, bottom: 80, left: 80, right: 80 + rightInsetRef.current },
+        maxZoom: 6,
+        duration: 1200,
+      });
       map.once("moveend", () => {
         suppressAutoCenterRef.current = false;
       });
