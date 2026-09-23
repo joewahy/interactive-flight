@@ -237,6 +237,20 @@
   padding-right: 28px;
 }
 
+.details-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.details-status-row .status-badge {
+  margin: 0;
+}
+
+.details-updated {
+  font-size: 11px;
+}
+
 .status-badge {
   display: inline-block;
   font-size: 11px;

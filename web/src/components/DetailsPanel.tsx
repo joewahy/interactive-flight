@@ -6,6 +6,7 @@ import { planeIconSvg } from "../planeIcon";
 
 interface Props {
   flight: FlightResult;
+  lastUpdatedMs: number | null;
   onClose: () => void;
 }
 
@@ -253,29 +254,31 @@ function WeatherBlock({ label, weather }: { label: string; weather: WeatherSnaps
   );
 }
 
-export default function DetailsPanel({ flight, onClose }: Props) {
+export default function DetailsPanel({ flight, lastUpdatedMs, onClose }: Props) {
   const [depWeather, setDepWeather] = useState<WeatherSnapshot | null | undefined>(undefined);
   const [arrWeather, setArrWeather] = useState<WeatherSnapshot | null | undefined>(undefined);
 
+  const { lat: depLat, lon: depLon } = flight.departure.airport;
+  const { lat: arrLat, lon: arrLon } = flight.arrival.airport;
+
+  // Keyed on coordinates rather than the flight object, so the periodic flight
+  // refresh doesn't re-fetch weather for the same two airports every minute.
   useEffect(() => {
     setDepWeather(undefined);
     setArrWeather(undefined);
 
-    const dep = flight.departure.airport;
-    const arr = flight.arrival.airport;
-
-    if (dep.lat !== null && dep.lon !== null) {
-      fetchWeather(dep.lat, dep.lon).then(setDepWeather);
+    if (depLat !== null && depLon !== null) {
+      fetchWeather(depLat, depLon).then(setDepWeather);
     } else {
       setDepWeather(null);
     }
 
-    if (arr.lat !== null && arr.lon !== null) {
-      fetchWeather(arr.lat, arr.lon).then(setArrWeather);
+    if (arrLat !== null && arrLon !== null) {
+      fetchWeather(arrLat, arrLon).then(setArrWeather);
     } else {
       setArrWeather(null);
     }
-  }, [flight]);
+  }, [depLat, depLon, arrLat, arrLon]);
 
   return (
     <div className="details-panel">
@@ -287,7 +290,12 @@ export default function DetailsPanel({ flight, onClose }: Props) {
         <h3>
           {flight.airline?.name ?? flight.number} · {flight.number}
         </h3>
-        <p className="status-badge">{flight.status}</p>
+        <div className="details-status-row">
+          <p className="status-badge">{flight.status}</p>
+          {lastUpdatedMs !== null && (
+            <span className="dim details-updated">Updated {formatAgo(Date.now() - lastUpdatedMs)}</span>
+          )}
+        </div>
       </div>
 
       {flight.aircraft?.image && (

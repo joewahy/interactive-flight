@@ -151,17 +151,23 @@ function buildPlaneMarkerElement(
 
 interface Props {
   flight: FlightResult | null;
+  /** Changes on a timer so an estimated (non-live) position keeps advancing between fetches. */
+  clockMs: number;
   /** Width of any panel covering the map's right edge, kept clear when framing the route. */
   rightInset: number;
   onMarkerClick: () => void;
 }
 
-export default function FlightMap({ flight, rightInset, onMarkerClick }: Props) {
+export default function FlightMap({ flight, clockMs, rightInset, onMarkerClick }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const loadedRef = useRef(false);
   const airportMarkersRef = useRef<Marker[]>([]);
   const planeMarkerRef = useRef<Marker | null>(null);
+  // Which flight (and live vs. estimated styling) the current plane marker was built
+  // for; while that matches, updates move the marker instead of rebuilding it, so a
+  // refresh doesn't drop an open hover tooltip.
+  const planeMarkerKeyRef = useRef<string | null>(null);
   const hasFramedFlight = useRef<string | null>(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
@@ -232,11 +238,15 @@ export default function FlightMap({ flight, rightInset, onMarkerClick }: Props) 
 
     airportMarkersRef.current.forEach((marker) => marker.remove());
     airportMarkersRef.current = [];
-    planeMarkerRef.current?.remove();
-    planeMarkerRef.current = null;
+    const removePlaneMarker = () => {
+      planeMarkerRef.current?.remove();
+      planeMarkerRef.current = null;
+      planeMarkerKeyRef.current = null;
+    };
 
     const routeSource = map.getSource(ROUTE_SOURCE_ID) as GeoJSONSource | undefined;
     if (!flight) {
+      removePlaneMarker();
       routeSource?.setData(emptyRoute() as GeoJSON.FeatureCollection);
       hasFramedFlight.current = null;
       planePositionRef.current = null;
@@ -276,7 +286,15 @@ export default function FlightMap({ flight, rightInset, onMarkerClick }: Props) 
     } else {
       routeSource?.setData(emptyRoute() as GeoJSON.FeatureCollection);
     }
-    if (position) {
+    const planeMarkerKey = position ? `${flight.number}|${position.isLive}` : null;
+    if (planeMarkerKey === null || planeMarkerKey !== planeMarkerKeyRef.current) removePlaneMarker();
+
+    if (position && planeMarkerRef.current) {
+      planeMarkerRef.current.setLngLat([position.lon, position.lat]);
+      const icon = planeMarkerRef.current.getElement().firstElementChild as HTMLElement | null;
+      if (icon) icon.style.transform = `rotate(${position.headingDeg}deg)`;
+      bounds.extend([position.lon, position.lat]);
+    } else if (position) {
       const marker = new Marker({
         element: buildPlaneMarkerElement(
           flight.number,
@@ -289,6 +307,7 @@ export default function FlightMap({ flight, rightInset, onMarkerClick }: Props) 
         .setLngLat([position.lon, position.lat])
         .addTo(map);
       planeMarkerRef.current = marker;
+      planeMarkerKeyRef.current = planeMarkerKey;
       bounds.extend([position.lon, position.lat]);
     }
 
@@ -304,7 +323,7 @@ export default function FlightMap({ flight, rightInset, onMarkerClick }: Props) 
         suppressAutoCenterRef.current = false;
       });
     }
-  }, [flight]);
+  }, [flight, clockMs]);
 
   return (
     <div className="flight-map">

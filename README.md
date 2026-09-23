@@ -2,9 +2,12 @@
 
 Enter a flight number, see it tracked live on a map: the flown portion of its
 route, current position (or a best-effort estimate when live position isn't
-reported), a hover tooltip with the flight number, and a click-through
-details panel with an aircraft photo, route/timing progress, and
-departure/arrival weather.
+reported), and a hover tooltip with the flight number. A details panel opens
+alongside the map as soon as a flight is found (on phones, tap the plane to
+open it), showing scheduled and actual times, route progress, live altitude,
+speed, heading and climb/descent rate, the aircraft (age, seats, engines, first
+flight, and a photo when one is available), and departure/arrival weather.
+While a flight is active, it refreshes every minute.
 
 ## Setup
 
@@ -32,3 +35,15 @@ departure/arrival weather.
 - When a flight has no live ADS-B position reported, the plane's position is
   estimated by interpolating along the great-circle route based on elapsed
   time between scheduled/revised departure and arrival.
+- Aircraft photos come from AeroDataBox, which sometimes returns a photo of a
+  different aircraft. The server only keeps a photo whose caption mentions the
+  aircraft's registration or type code (e.g. `A321`), so some flights show no
+  photo. Kept photos are credited to their photographer (CC BY).
+- Aircraft details (age, seats, engines, dates) come from a second AeroDataBox
+  lookup by registration, cached in memory on the server for 24 hours per
+  aircraft. If it fails, the search still succeeds without those details.
+- While a flight is active (from an hour before departure until it's arrived or
+  canceled), the frontend re-fetches it every 60 seconds, skipping refreshes
+  while the tab is hidden. That's at most about 60 AeroDataBox requests per hour
+  per open tab. Between refreshes, a 30-second local clock keeps the estimated
+  position, progress bar and "X ago" labels current without any API calls.
