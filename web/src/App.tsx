@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import SearchBar from "./components/SearchBar";
 import DetailsPanel from "./components/DetailsPanel";
 import { fetchFlightByNumber, ApiError } from "./api";
+import { parseApiTime } from "./flightStatus";
 import type { FlightResult } from "./types";
 import "./App.css";
 
@@ -9,9 +10,9 @@ import "./App.css";
 // of shipping it in the initial page load.
 const FlightMap = lazy(() => import("./components/FlightMap"));
 
-// Matches .details-panel's width and the breakpoint where it goes full-screen (App.css).
+// Match .details-panel's width and the phone breakpoint where it becomes a bottom sheet (App.css).
 const DETAILS_PANEL_WIDTH = 380;
-const FULLSCREEN_PANEL_QUERY = "(max-width: 520px)";
+const SHEET_QUERY = "(max-width: 520px)";
 
 // Re-renders so time-derived UI (estimated position, progress, "X ago" labels) keeps moving.
 const CLOCK_TICK_MS = 30_000;
@@ -22,24 +23,29 @@ const FINAL_STATUSES = new Set(["Arrived", "Canceled", "CanceledUncertain"]);
 // if the status never reaches a final one.
 const REFRESH_WINDOW_MS = 60 * 60_000;
 
-function parseUtc(iso: string | null): number | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  return Number.isNaN(t) ? null : t;
-}
-
 function shouldAutoRefresh(flight: FlightResult, now: number): boolean {
   if (FINAL_STATUSES.has(flight.status)) return false;
-  const arr = parseUtc(flight.arrival.revisedUtc ?? flight.arrival.scheduledUtc);
+  const arr = parseApiTime(flight.arrival.revisedUtc ?? flight.arrival.scheduledUtc);
   if (arr !== null && now - arr > REFRESH_WINDOW_MS) return false;
   if (flight.location) return true;
-  const dep = parseUtc(flight.departure.revisedUtc ?? flight.departure.scheduledUtc);
+  const dep = parseApiTime(flight.departure.revisedUtc ?? flight.departure.scheduledUtc);
   return dep !== null && dep - now < REFRESH_WINDOW_MS;
 }
 
 /** Identifies one leg across refreshes, since a flight number can cover several days' legs. */
 function flightKey(flight: FlightResult): string {
   return `${flight.number}|${flight.departure.scheduledUtc ?? ""}`;
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const onChange = () => setMatches(list.matches);
+    list.addEventListener("change", onChange);
+    return () => list.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
 }
 
 export default function App() {
@@ -56,7 +62,30 @@ export default function App() {
   const searchRef = useRef({ query: "", id: 0 });
   const lastUpdatedRef = useRef(0);
 
+  const isSheet = useMediaQuery(SHEET_QUERY);
+  const [sheetPeekHeight, setSheetPeekHeight] = useState(0);
+  // The search card sits over the map's top-left corner; framing keeps the route below it.
+  const searchCardRef = useRef<HTMLDivElement | null>(null);
+  const [searchCardBottom, setSearchCardBottom] = useState(0);
+  // Bumped per search so the map re-frames the route even when the same flight is searched again.
+  const [searchCount, setSearchCount] = useState(0);
+  const closeDetails = useCallback(() => setShowDetails(false), []);
+
   const selectedFlight = flights[selectedIndex] ?? null;
+  const autoRefresh = selectedFlight !== null && shouldAutoRefresh(selectedFlight, clockMs);
+  const mapInsets = {
+    top: searchCardBottom,
+    right: showDetails && !isSheet ? DETAILS_PANEL_WIDTH : 0,
+    bottom: showDetails && isSheet ? sheetPeekHeight : 0,
+  };
+
+  useEffect(() => {
+    const card = searchCardRef.current;
+    if (!card) return;
+    const observer = new ResizeObserver(() => setSearchCardBottom(Math.ceil(card.getBoundingClientRect().bottom)));
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => setClockMs(Date.now()), CLOCK_TICK_MS);
@@ -100,6 +129,7 @@ export default function App() {
   async function handleSearch(flightNumber: string) {
     const searchId = searchRef.current.id + 1;
     searchRef.current = { query: flightNumber, id: searchId };
+    setSearchCount(searchId);
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -116,8 +146,7 @@ export default function App() {
       } else {
         setFlights(results);
         setSelectedIndex(0);
-        // On phones the panel covers the whole map, so leave it to the user to open.
-        setShowDetails(!window.matchMedia(FULLSCREEN_PANEL_QUERY).matches);
+        setShowDetails(true);
         setSuccess(
           results.length === 1
             ? `Found flight ${results[0].number}.`
@@ -134,17 +163,18 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app" style={{ "--map-inset-bottom": `${mapInsets.bottom}px` } as CSSProperties}>
       <Suspense fallback={<div className="map-loading">Loading map...</div>}>
         <FlightMap
           flight={selectedFlight}
           clockMs={clockMs}
-          rightInset={showDetails ? DETAILS_PANEL_WIDTH : 0}
+          insets={mapInsets}
+          framingKey={searchCount}
           onMarkerClick={() => setShowDetails(true)}
         />
       </Suspense>
 
-      <div className="overlay top">
+      <div className="overlay top" ref={searchCardRef}>
         <h1>Interactive Flight</h1>
         <SearchBar onSearch={handleSearch} loading={loading} />
         {error && <p className="error-text">{error}</p>}
@@ -167,12 +197,19 @@ export default function App() {
 
       {selectedFlight && !showDetails && (
         <button className="hint-pill" onClick={() => setShowDetails(true)}>
-          Click the plane on the map for details
+          Show flight details
         </button>
       )}
 
       {selectedFlight && showDetails && (
-        <DetailsPanel flight={selectedFlight} lastUpdatedMs={lastUpdatedMs} onClose={() => setShowDetails(false)} />
+        <DetailsPanel
+          flight={selectedFlight}
+          lastUpdatedMs={lastUpdatedMs}
+          autoRefresh={autoRefresh}
+          variant={isSheet ? "sheet" : "side"}
+          onPeekHeightChange={setSheetPeekHeight}
+          onClose={closeDetails}
+        />
       )}
     </div>
   );

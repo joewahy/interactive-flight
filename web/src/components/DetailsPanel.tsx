@@ -1,27 +1,35 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { Airport, FlightResult, Movement } from "../types";
 import { describeWeatherCode, fetchWeather, type WeatherSnapshot } from "../weather";
 import { getFlightProgress } from "../flightPosition";
+import {
+  delayMinutes,
+  delayTone,
+  describeDelay,
+  formatAirportTime,
+  formatDuration,
+  movementTime,
+  parseApiTime,
+  summarizeStatus,
+} from "../flightStatus";
 import { planeIconSvg } from "../planeIcon";
 
 interface Props {
   flight: FlightResult;
   lastUpdatedMs: number | null;
+  /** Whether the flight is still being re-fetched on a timer (so "Updated X ago" is meaningful). */
+  autoRefresh: boolean;
+  /** "side" docks to the right edge; "sheet" is the phone bottom sheet with a collapsed peek state. */
+  variant: "side" | "sheet";
+  /** Reports the sheet's collapsed height, so the map can keep the route clear of it. */
+  onPeekHeightChange?: (height: number) => void;
   onClose: () => void;
 }
 
-function formatClockTime(iso: string | null): string {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-}
-
 /** The airport's own local timezone label (e.g. "PDT (GMT-7)"), independent of the viewer's. */
-function formatTimeZoneLabel(timeZone: string | null, atIso: string | null): string | null {
+function formatTimeZoneLabel(timeZone: string | null, atUtc: string | null): string | null {
   if (!timeZone) return null;
-  const date = atIso ? new Date(atIso) : new Date();
-  if (Number.isNaN(date.getTime())) return null;
+  const date = new Date(parseApiTime(atUtc) ?? Date.now());
   try {
     const abbrev = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
       .formatToParts(date)
@@ -36,33 +44,13 @@ function formatTimeZoneLabel(timeZone: string | null, atIso: string | null): str
   }
 }
 
-function formatDurationHM(ms: number): string {
-  const totalMinutes = Math.max(0, Math.round(ms / 60_000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${hours}:${String(minutes).padStart(2, "0")}`;
-}
-
 /** "just now", "12 min ago", or "1 h 5 min ago". */
 function formatAgo(ms: number): string {
-  const totalMinutes = Math.max(0, Math.round(ms / 60_000));
-  if (totalMinutes === 0) return "just now";
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${hours > 0 ? `${hours} h ` : ""}${minutes} min ago`;
+  return ms < 60_000 ? "just now" : `${formatDuration(ms)} ago`;
 }
 
 function formatKm(km: number): string {
   return `${Math.round(km).toLocaleString()} km`;
-}
-
-/** "Actual" once the revised/scheduled time has passed, "Estimated" while it's still ahead. */
-function movementStatusLabel(movement: Movement): string {
-  const iso = movement.revisedUtc ?? movement.scheduledUtc;
-  if (!iso) return "Estimated";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "Estimated";
-  return t <= Date.now() ? "Actual" : "Estimated";
 }
 
 function movementMeta(movement: Movement): string | null {
@@ -104,73 +92,152 @@ function aircraftFacts(details: AircraftDetails): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-function RouteEndpoint({ airport, atIso }: { airport: Airport; atIso: string | null }) {
-  const tz = formatTimeZoneLabel(airport.timeZone, atIso);
+function airportCode(airport: Airport): string {
+  return airport.iata ?? airport.icao ?? "—";
+}
+
+function CloseIcon() {
   return (
-    <div className="route-endpoint">
-      <span className="route-code">{airport.iata ?? airport.icao ?? "—"}</span>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function StatusBlock({ flight, lastUpdatedMs, autoRefresh }: Pick<Props, "flight" | "lastUpdatedMs" | "autoRefresh">) {
+  const status = summarizeStatus(flight);
+  return (
+    <div className={`status-block tone-${status.tone}`}>
+      {/* Polite so a status change from a background refresh is announced, not the every-minute timestamp. */}
+      <div aria-live="polite" aria-atomic="true">
+        <p className="status-headline">{status.headline}</p>
+        {status.detail && <p className="status-detail">{status.detail}</p>}
+      </div>
+      {autoRefresh && lastUpdatedMs !== null && (
+        <p className="status-updated">Updates every minute · last {formatAgo(Date.now() - lastUpdatedMs)}</p>
+      )}
+    </div>
+  );
+}
+
+function RouteEndpoint({ airport, atUtc, align }: { airport: Airport; atUtc: string | null; align: "start" | "end" }) {
+  const tz = formatTimeZoneLabel(airport.timeZone, atUtc);
+  return (
+    <div className={`route-endpoint ${align}`}>
+      <span className="route-code">{airportCode(airport)}</span>
       <span className="route-city">{airport.municipality ?? airport.name}</span>
       {tz && <span className="route-tz">{tz}</span>}
     </div>
   );
 }
 
-function RouteTimes({ movement, align }: { movement: Movement; align: "left" | "right" }) {
-  const meta = movementMeta(movement);
+function RouteHeader({ flight }: { flight: FlightResult }) {
+  const depScheduled = parseApiTime(flight.departure.scheduledUtc);
+  const arrScheduled = parseApiTime(flight.arrival.scheduledUtc);
+  const blockMs = depScheduled !== null && arrScheduled !== null && arrScheduled > depScheduled ? arrScheduled - depScheduled : null;
+  const distanceKm = flight.greatCircleDistanceKm;
+
   return (
-    <div className={`route-times-col ${align}`}>
-      <div className="route-time-box">
-        <span className="route-time-label">Scheduled</span>
-        <span className="route-time-value">{formatClockTime(movement.scheduledLocal)}</span>
+    <div className="route-header">
+      <RouteEndpoint airport={flight.departure.airport} atUtc={flight.departure.scheduledUtc} align="start" />
+      <div className="route-span">
+        {blockMs !== null && (
+          <span className="route-span-value">
+            <span className="sr-only">Scheduled flight time </span>
+            {formatDuration(blockMs)}
+          </span>
+        )}
+        <span className="route-span-line" aria-hidden="true" />
+        {distanceKm !== null && <span className="route-span-sub">{formatKm(distanceKm)}</span>}
       </div>
-      <div className="route-time-box">
-        <span className="route-time-label">{movementStatusLabel(movement)}</span>
-        <span className="route-time-value emphasis">
-          {formatClockTime(movement.revisedLocal ?? movement.scheduledLocal)}
-        </span>
+      <RouteEndpoint airport={flight.arrival.airport} atUtc={flight.arrival.scheduledUtc} align="end" />
+    </div>
+  );
+}
+
+function TimeColumn({ flight, which }: { flight: FlightResult; which: "departure" | "arrival" }) {
+  const movement = flight[which];
+  const { timeZone } = movement.airport;
+  const current = movementTime(flight, which);
+  const delay = delayMinutes(movement);
+  const meta = movementMeta(movement);
+  const verb = which === "departure" ? "Departure from" : "Arrival at";
+
+  return (
+    <div className={`route-times-col ${which === "departure" ? "start" : "end"}`} role="group" aria-label={`${verb} ${airportCode(movement.airport)}`}>
+      <div className="stat-tile">
+        <span className="stat-label">Scheduled</span>
+        <span className="stat-value muted">{formatAirportTime(movement.scheduledUtc, timeZone)}</span>
       </div>
-      {meta && <p className="route-meta dim">{meta}</p>}
+      {current && (
+        <div className="stat-tile">
+          <span className="stat-label">{current.label}</span>
+          <span className="stat-value">{current.utc ? formatAirportTime(current.utc, timeZone) : "Not reported"}</span>
+          {delay !== null && <span className={`stat-delta tone-${delayTone(delay)}`}>{describeDelay(delay)}</span>}
+        </div>
+      )}
+      {meta && <p className="route-meta">{meta}</p>}
     </div>
   );
 }
 
 function RouteProgress({ flight }: { flight: FlightResult }) {
-  const { fraction, depTimeMs, arrTimeMs } = getFlightProgress(flight);
-  const distanceKm = flight.greatCircleDistanceKm;
+  const { fraction, depTimeMs, arrTimeMs, phase } = getFlightProgress(flight);
+  if (fraction === null) return null;
 
+  const distanceKm = flight.greatCircleDistanceKm;
   const now = Date.now();
-  const leftLabel =
+  const hasLeft = phase === "airborne" || phase === "landed";
+
+  const departedLabel =
     depTimeMs === null
       ? null
-      : now >= depTimeMs
-        ? `${formatDurationHM(now - depTimeMs)} ago`
-        : `in ${formatDurationHM(depTimeMs - now)}`;
-  const rightLabel =
+      : hasLeft
+        ? `Departed ${formatAgo(now - depTimeMs)}`
+        : depTimeMs > now
+          ? `Departs in ${formatDuration(depTimeMs - now)}`
+          : `Due to depart ${formatAgo(now - depTimeMs)}`;
+  const arrivalLabel =
     arrTimeMs === null
       ? null
-      : now <= arrTimeMs
-        ? `in ${formatDurationHM(arrTimeMs - now)}`
-        : `${formatDurationHM(now - arrTimeMs)} ago`;
+      : phase === "landed"
+        ? `Landed ${formatAgo(now - arrTimeMs)}`
+        : arrTimeMs > now
+          ? `Lands in ${formatDuration(arrTimeMs - now)}`
+          : `Due to land ${formatAgo(now - arrTimeMs)}`;
+
+  const flownKm = distanceKm !== null ? distanceKm * fraction : null;
+  const remainingKm = distanceKm !== null ? distanceKm * (1 - fraction) : null;
+  const percent = Math.round(fraction * 100);
+  const valueText = remainingKm !== null ? `${percent}% flown, ${formatKm(remainingKm)} to go` : `${percent}% flown`;
 
   return (
     <div className="route-progress">
-      <div className="route-progress-track">
+      <div
+        className="route-progress-track"
+        role="progressbar"
+        aria-label="Flight progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        aria-valuetext={valueText}
+      >
         <div className="route-progress-fill" style={{ width: `${fraction * 100}%` }} />
         <div
           className="route-progress-plane"
           style={{ left: `${fraction * 100}%` }}
-          dangerouslySetInnerHTML={{ __html: planeIconSvg("#4fd1ff") }}
+          dangerouslySetInnerHTML={{ __html: planeIconSvg("currentColor") }}
         />
       </div>
       <div className="route-progress-labels">
-        <span>
-          {distanceKm !== null && `${formatKm(distanceKm * fraction)}, `}
-          {leftLabel}
-        </span>
-        <span>
-          {distanceKm !== null && `${formatKm(distanceKm * (1 - fraction))}, `}
-          {rightLabel}
-        </span>
+        <div>
+          {flownKm !== null && <span className="route-progress-km">{formatKm(flownKm)} flown</span>}
+          {departedLabel && <span>{departedLabel}</span>}
+        </div>
+        <div className="end">
+          {remainingKm !== null && <span className="route-progress-km">{formatKm(remainingKm)} to go</span>}
+          {arrivalLabel && <span>{arrivalLabel}</span>}
+        </div>
       </div>
     </div>
   );
@@ -178,21 +245,6 @@ function RouteProgress({ flight }: { flight: FlightResult }) {
 
 // Below this, a reported vertical rate is just noise around level flight.
 const LEVEL_FLIGHT_FPM = 100;
-
-function AircraftDetailsLines({ details }: { details: AircraftDetails }) {
-  const facts = aircraftFacts(details);
-  const firstFlight = formatCalendarDate(details.firstFlightDate);
-  const delivered = formatCalendarDate(details.deliveryDate);
-  const dates = [firstFlight && `First flew ${firstFlight}`, delivered && `delivered ${delivered}`]
-    .filter(Boolean)
-    .join(", ");
-  return (
-    <>
-      {facts && <p className="aircraft-facts">{facts}</p>}
-      {dates && <p className="dim">{dates.charAt(0).toUpperCase() + dates.slice(1)}</p>}
-    </>
-  );
-}
 
 function LiveStats({ location }: { location: NonNullable<FlightResult["location"]> }) {
   const vs = location.verticalSpeedFpm;
@@ -205,7 +257,7 @@ function LiveStats({ location }: { location: NonNullable<FlightResult["location"
             label: vs > 0 ? "Climbing" : "Descending",
             value: `${Math.abs(Math.round(vs)).toLocaleString()} ft/min`,
           };
-  const reportedMs = Date.parse(location.reportedAtUtc);
+  const reportedMs = parseApiTime(location.reportedAtUtc);
 
   const tiles = [
     {
@@ -225,126 +277,230 @@ function LiveStats({ location }: { location: NonNullable<FlightResult["location"
   ];
 
   return (
-    <div className="section">
-      <h4>Live</h4>
+    <section className="section" aria-labelledby="live-heading">
+      <h3 id="live-heading">Live position</h3>
       <div className="live-stats">
         {tiles.map((tile) => (
-          <div key={tile.label} className="route-time-box">
-            <span className="route-time-label">{tile.label}</span>
-            <span className="route-time-value emphasis">{tile.value}</span>
-            {"sub" in tile && tile.sub && <span className="dim live-stat-sub">{tile.sub}</span>}
+          <div key={tile.label} className="stat-tile">
+            <span className="stat-label">{tile.label}</span>
+            <span className="stat-value">{tile.value}</span>
+            {"sub" in tile && tile.sub && <span className="stat-sub">{tile.sub}</span>}
           </div>
         ))}
       </div>
-      {!Number.isNaN(reportedMs) && (
-        <p className="dim live-reported">Reported {formatAgo(Date.now() - reportedMs)}</p>
-      )}
-    </div>
+      {reportedMs !== null && <p className="section-note">Reported by the aircraft {formatAgo(Date.now() - reportedMs)}</p>}
+    </section>
   );
 }
 
-function WeatherBlock({ label, weather }: { label: string; weather: WeatherSnapshot | null | undefined }) {
-  if (weather === undefined) return <p className="weather-line">{label}: loading…</p>;
-  if (weather === null) return <p className="weather-line">{label}: unavailable</p>;
+function AircraftPhoto({ aircraft }: { aircraft: NonNullable<FlightResult["aircraft"]> }) {
+  const image = aircraft.image;
+  if (!image) return null;
+  return (
+    <figure className="aircraft-photo">
+      <img src={image.url} alt={aircraft.model ? `A ${aircraft.model}` : "The aircraft"} loading="lazy" />
+      {image.author && (
+        <figcaption>
+          Photo:{" "}
+          {image.pageUrl ? (
+            <a href={image.pageUrl} target="_blank" rel="noopener noreferrer">
+              {image.author}
+            </a>
+          ) : (
+            image.author
+          )}
+          , CC BY
+        </figcaption>
+      )}
+    </figure>
+  );
+}
+
+function AircraftSection({ aircraft }: { aircraft: NonNullable<FlightResult["aircraft"]> }) {
+  const details = aircraft.details;
+  const facts = details ? aircraftFacts(details) : null;
+  const firstFlight = details ? formatCalendarDate(details.firstFlightDate) : null;
+  const delivered = details ? formatCalendarDate(details.deliveryDate) : null;
+  const dates = [firstFlight && `First flew ${firstFlight}`, delivered && `delivered ${delivered}`].filter(Boolean).join(", ");
+
+  if (!aircraft.model && !aircraft.reg && !facts) return null;
+
+  return (
+    <section className="section" aria-labelledby="aircraft-heading">
+      <h3 id="aircraft-heading">Aircraft</h3>
+      {(aircraft.model || aircraft.reg) && (
+        <p className="aircraft-name">
+          {aircraft.model}
+          {aircraft.model && aircraft.reg && " · "}
+          {aircraft.reg && <span className="aircraft-reg">{aircraft.reg}</span>}
+        </p>
+      )}
+      {facts && <p>{facts}</p>}
+      {dates && <p className="muted">{dates.charAt(0).toUpperCase() + dates.slice(1)}</p>}
+    </section>
+  );
+}
+
+type WeatherState = WeatherSnapshot | null | undefined;
+
+function useAirportWeather(lat: number | null, lon: number | null): [WeatherState, () => void] {
+  const [weather, setWeather] = useState<WeatherState>(undefined);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (lat === null || lon === null) {
+      setWeather(null);
+      return;
+    }
+    let current = true;
+    setWeather(undefined);
+    fetchWeather(lat, lon).then((result) => {
+      if (current) setWeather(result);
+    });
+    return () => {
+      current = false;
+    };
+  }, [lat, lon, attempt]);
+
+  return [weather, useCallback(() => setAttempt((n) => n + 1), [])];
+}
+
+function WeatherLine({ label, weather, onRetry }: { label: string; weather: WeatherState; onRetry: () => void }) {
+  if (weather === undefined) return <p className="weather-line muted">{label}: loading weather…</p>;
+  if (weather === null) {
+    return (
+      <p className="weather-line">
+        {label}: weather couldn't be loaded.{" "}
+        <button type="button" className="text-button" onClick={onRetry}>
+          Try again
+        </button>
+      </p>
+    );
+  }
   return (
     <p className="weather-line">
-      {label}: {Math.round(weather.temperatureC)}°C, {describeWeatherCode(weather.weatherCode)},{" "}
+      <span className="weather-code">{label}</span> {Math.round(weather.temperatureC)}°C, {describeWeatherCode(weather.weatherCode).toLowerCase()},{" "}
       {Math.round(weather.windSpeedKmh)} km/h wind
     </p>
   );
 }
 
-export default function DetailsPanel({ flight, lastUpdatedMs, onClose }: Props) {
-  const [depWeather, setDepWeather] = useState<WeatherSnapshot | null | undefined>(undefined);
-  const [arrWeather, setArrWeather] = useState<WeatherSnapshot | null | undefined>(undefined);
+export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, variant, onPeekHeightChange, onClose }: Props) {
+  const titleId = useId();
+  const panelRef = useRef<HTMLElement | null>(null);
+  const peekRef = useRef<HTMLDivElement | null>(null);
+  const [peekHeight, setPeekHeight] = useState<number | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const collapsed = variant === "sheet" && !expanded;
 
-  const { lat: depLat, lon: depLon } = flight.departure.airport;
-  const { lat: arrLat, lon: arrLon } = flight.arrival.airport;
+  const [depWeather, retryDepWeather] = useAirportWeather(flight.departure.airport.lat, flight.departure.airport.lon);
+  const [arrWeather, retryArrWeather] = useAirportWeather(flight.arrival.airport.lat, flight.arrival.airport.lon);
 
-  // Keyed on coordinates rather than the flight object, so the periodic flight
-  // refresh doesn't re-fetch weather for the same two airports every minute.
+  // Move focus into the panel when it opens, and hand it back when it closes, so
+  // keyboard and screen-reader users land on the result instead of losing their place.
   useEffect(() => {
-    setDepWeather(undefined);
-    setArrWeather(undefined);
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    titleRef.current?.focus({ preventScroll: true });
+    return () => {
+      const active = document.activeElement;
+      const focusWasInPanel = !active || active === document.body || panelRef.current?.contains(active);
+      if (!focusWasInPanel) return;
+      const target = opener?.isConnected && opener !== document.body ? opener : document.querySelector<HTMLElement>(".search-bar input");
+      target?.focus({ preventScroll: true });
+    };
+  }, []);
 
-    if (depLat !== null && depLon !== null) {
-      fetchWeather(depLat, depLon).then(setDepWeather);
-    } else {
-      setDepWeather(null);
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
     }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
-    if (arrLat !== null && arrLon !== null) {
-      fetchWeather(arrLat, arrLon).then(setArrWeather);
-    } else {
-      setArrWeather(null);
-    }
-  }, [depLat, depLon, arrLat, arrLon]);
+  // Collapsing keeps the sheet's scroll at the top, so the peek always shows the status.
+  useEffect(() => {
+    if (collapsed && panelRef.current) panelRef.current.scrollTop = 0;
+  }, [collapsed]);
+
+  // The collapsed sheet shows exactly the handle, title and status block. Their height
+  // varies (wrapping detail, the refresh line), so it's measured rather than fixed.
+  useEffect(() => {
+    const peek = peekRef.current;
+    if (variant !== "sheet" || !peek) return;
+    const observer = new ResizeObserver(() => {
+      const height = Math.ceil(peek.getBoundingClientRect().height);
+      setPeekHeight(height);
+      onPeekHeightChange?.(height);
+    });
+    observer.observe(peek);
+    return () => observer.disconnect();
+  }, [variant, onPeekHeightChange]);
+
+  const airlineName = flight.airline?.name;
 
   return (
-    <div className="details-panel">
-      <button className="close-btn" onClick={onClose} aria-label="Close details">
-        ✕
-      </button>
+    <section
+      ref={panelRef}
+      className={`details-panel ${variant}${collapsed ? " collapsed" : ""}`}
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      style={collapsed && peekHeight !== null ? { maxHeight: peekHeight } : undefined}
+    >
+      {/* Leads the side panel. The phone sheet's peek has no room for it, so there it
+          opens the expanded part instead. */}
+      {variant === "side" && flight.aircraft && <AircraftPhoto aircraft={flight.aircraft} />}
 
-      <div className="details-header">
-        <h3>
-          {flight.airline?.name ?? flight.number} · {flight.number}
-        </h3>
-        <div className="details-status-row">
-          <p className="status-badge">{flight.status}</p>
-          {lastUpdatedMs !== null && (
-            <span className="dim details-updated">Updated {formatAgo(Date.now() - lastUpdatedMs)}</span>
-          )}
-        </div>
-      </div>
-
-      {flight.aircraft?.image && (
-        <figure className="aircraft-photo">
-          <img src={flight.aircraft.image.url} alt={flight.aircraft.model ?? "Aircraft"} loading="lazy" />
-          {flight.aircraft.image.author && (
-            <figcaption>
-              Photo:{" "}
-              {flight.aircraft.image.pageUrl ? (
-                <a href={flight.aircraft.image.pageUrl} target="_blank" rel="noopener noreferrer">
-                  {flight.aircraft.image.author}
-                </a>
-              ) : (
-                flight.aircraft.image.author
-              )}
-              , CC BY
-            </figcaption>
-          )}
-        </figure>
+      <div ref={peekRef} className="details-peek">
+      {variant === "sheet" && (
+        <button
+          type="button"
+          className="sheet-handle"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Show less" : "Show all flight details"}
+          onClick={() => setExpanded((e) => !e)}
+        >
+          <span className="sheet-grip" aria-hidden="true" />
+        </button>
       )}
 
-      <div className="route-header">
-        <RouteEndpoint airport={flight.departure.airport} atIso={flight.departure.revisedLocal ?? flight.departure.scheduledLocal} />
-        <div className="route-badge" dangerouslySetInnerHTML={{ __html: planeIconSvg("#0b0d14") }} />
-        <RouteEndpoint airport={flight.arrival.airport} atIso={flight.arrival.revisedLocal ?? flight.arrival.scheduledLocal} />
+      <div className="details-top">
+        <h2 id={titleId} ref={titleRef} tabIndex={-1}>
+          {flight.number}
+          {airlineName && <span className="details-airline">{airlineName}</span>}
+        </h2>
+        <button type="button" className="close-btn" onClick={onClose} aria-label="Close flight details">
+          <CloseIcon />
+        </button>
       </div>
 
-      <div className="route-times">
-        <RouteTimes movement={flight.departure} align="left" />
-        <RouteTimes movement={flight.arrival} align="right" />
+      <StatusBlock flight={flight} lastUpdatedMs={lastUpdatedMs} autoRefresh={autoRefresh} />
       </div>
 
-      <RouteProgress flight={flight} />
+      {/* Below the sheet's peek; inert while collapsed so it's out of the tab order too. */}
+      <div className="details-rest" inert={collapsed}>
+        {variant === "sheet" && flight.aircraft && <AircraftPhoto aircraft={flight.aircraft} />}
+        <RouteHeader flight={flight} />
 
-      {flight.location && <LiveStats location={flight.location} />}
+        <div className="route-times">
+          <TimeColumn flight={flight} which="departure" />
+          <TimeColumn flight={flight} which="arrival" />
+        </div>
 
-      <div className="section">
-        <h4>Aircraft</h4>
-        <p>{flight.aircraft?.model ?? "Unknown model"}</p>
-        <p className="dim">{flight.aircraft?.reg ?? "No registration available"}</p>
-        {flight.aircraft?.details && <AircraftDetailsLines details={flight.aircraft.details} />}
+        <RouteProgress flight={flight} />
+
+        {flight.location && <LiveStats location={flight.location} />}
+
+        {flight.aircraft && <AircraftSection aircraft={flight.aircraft} />}
+
+        <section className="section" aria-labelledby="weather-heading">
+          <h3 id="weather-heading">Weather now</h3>
+          <WeatherLine label={airportCode(flight.departure.airport)} weather={depWeather} onRetry={retryDepWeather} />
+          <WeatherLine label={airportCode(flight.arrival.airport)} weather={arrWeather} onRetry={retryArrWeather} />
+        </section>
       </div>
-
-      <div className="section">
-        <h4>Weather</h4>
-        <WeatherBlock label={flight.departure.airport.iata ?? "Departure"} weather={depWeather} />
-        <WeatherBlock label={flight.arrival.airport.iata ?? "Arrival"} weather={arrWeather} />
-      </div>
-
-    </div>
+    </section>
   );
 }

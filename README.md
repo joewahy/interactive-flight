@@ -3,9 +3,11 @@
 Enter a flight number, see it tracked live on a map: the flown portion of its
 route, current position (or a best-effort estimate when live position isn't
 reported), and a hover tooltip with the flight number. A details panel opens
-alongside the map as soon as a flight is found (on phones, tap the plane to
-open it), showing scheduled and actual times, route progress, live altitude,
-speed, heading and climb/descent rate, the aircraft (age, seats, engines, first
+alongside the map as soon as a flight is found (a bottom sheet on phones). It
+leads with a plain-language status ("Landed 16 min early", "In the air · 42 min
+late") colored by whether the flight is on time, then scheduled vs. actual
+times in each airport's own time zone, route progress, live altitude, speed,
+heading and climb/descent rate, the aircraft (age, seats, engines, first
 flight, and a photo when one is available), and departure/arrival weather.
 While a flight is active, it refreshes every minute.
 

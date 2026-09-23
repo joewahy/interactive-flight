@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Map as MaplibreMap, Marker, NavigationControl, LngLatBounds, type GeoJSONSource } from "maplibre-gl";
+import { AttributionControl, Map as MaplibreMap, Marker, NavigationControl, LngLatBounds, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { FlightResult } from "../types";
 import { getFlightPosition } from "../flightPosition";
@@ -12,6 +12,12 @@ import { planeIconSvg } from "../planeIcon";
 const MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
 const ROUTE_SOURCE_ID = "flight-route";
 const ROUTE_SAMPLE_POINTS = 128;
+
+// Mirror the --accent / --text / --muted tokens in index.css; MapLibre paint and
+// marker styles can't read CSS custom properties.
+const ACCENT = "#1f6fb2";
+const INK = "#1c2230";
+const ESTIMATE = "#6b7280";
 
 // Below this zoom the plane marker stays at its base size; past it, it grows with
 // zoom (capped) so a close-up view doesn't leave it looking tiny against the map.
@@ -79,7 +85,7 @@ function buildTooltipElement(text: string): HTMLDivElement {
     left: 50%;
     bottom: 130%;
     transform: translateX(-50%);
-    background: rgba(38, 43, 59, 0.9);
+    background: ${INK};
     color: #fff;
     padding: 2px 8px;
     border-radius: 4px;
@@ -100,7 +106,8 @@ function buildAirportMarkerElement(color: string, label: string): HTMLDivElement
     height: 12px;
     border-radius: 50%;
     background: ${color};
-    border: 2px solid rgba(255, 255, 255, 0.85);
+    border: 2px solid #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     cursor: default;
   `;
   const tooltip = buildTooltipElement(label);
@@ -133,9 +140,9 @@ function buildPlaneMarkerElement(
     width: ${size}px;
     height: ${size}px;
     transform: rotate(${headingDeg}deg);
-    filter: drop-shadow(0 0 6px ${isLive ? "#4fd1ff" : "rgba(255,255,255,0.5)"});
+    filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
   `;
-  icon.innerHTML = planeIconSvg(isLive ? "#4fd1ff" : "#c9cdda");
+  icon.innerHTML = planeIconSvg(isLive ? ACCENT : ESTIMATE);
   wrapper.appendChild(icon);
 
   const tooltip = buildTooltipElement(flightNumber);
@@ -153,12 +160,14 @@ interface Props {
   flight: FlightResult | null;
   /** Changes on a timer so an estimated (non-live) position keeps advancing between fetches. */
   clockMs: number;
-  /** Width of any panel covering the map's right edge, kept clear when framing the route. */
-  rightInset: number;
+  /** Space covered by the search card (top), details panel (right) or phone sheet (bottom), kept clear when framing the route. */
+  insets: { top: number; right: number; bottom: number };
+  /** Changes on each new search; the route is framed once per key rather than per refresh. */
+  framingKey: number;
   onMarkerClick: () => void;
 }
 
-export default function FlightMap({ flight, clockMs, rightInset, onMarkerClick }: Props) {
+export default function FlightMap({ flight, clockMs, insets, framingKey, onMarkerClick }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const loadedRef = useRef(false);
@@ -171,8 +180,10 @@ export default function FlightMap({ flight, clockMs, rightInset, onMarkerClick }
   const hasFramedFlight = useRef<string | null>(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
-  const rightInsetRef = useRef(rightInset);
-  rightInsetRef.current = rightInset;
+  const insetsRef = useRef(insets);
+  insetsRef.current = insets;
+  const framingKeyRef = useRef(framingKey);
+  framingKeyRef.current = framingKey;
   // Current plane position, kept centered whenever the user zooms (see the
   // "zoomend" handler below) so tracking a flight doesn't require re-finding
   // the plane after every zoom step.
@@ -189,9 +200,12 @@ export default function FlightMap({ flight, clockMs, rightInset, onMarkerClick }
       style: MAP_STYLE_URL,
       center: [10, 20],
       zoom: 1.4,
-      attributionControl: { compact: true },
+      attributionControl: false,
     });
-    map.addControl(new NavigationControl({ showCompass: false }), "bottom-right");
+    // Bottom-left, not MapLibre's default right side, which the details panel covers.
+    // On phones the sheet covers the bottom instead; App.css lifts this corner above it.
+    map.addControl(new NavigationControl({ showCompass: false }), "bottom-left");
+    map.addControl(new AttributionControl({ compact: true }), "bottom-left");
     mapRef.current = map;
 
     // Keep the plane centered through zoom in/out: MapLibre's default scroll/pinch
@@ -209,18 +223,18 @@ export default function FlightMap({ flight, clockMs, rightInset, onMarkerClick }
     map.on("load", () => {
       map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: emptyRoute() as GeoJSON.FeatureCollection });
       map.addLayer({
-        id: `${ROUTE_SOURCE_ID}-glow`,
+        id: `${ROUTE_SOURCE_ID}-casing`,
         type: "line",
         source: ROUTE_SOURCE_ID,
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#4fd1ff", "line-width": 6, "line-opacity": 0.2, "line-blur": 2 },
+        paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 },
       });
       map.addLayer({
         id: `${ROUTE_SOURCE_ID}-line`,
         type: "line",
         source: ROUTE_SOURCE_ID,
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#4fd1ff", "line-width": 2, "line-opacity": 0.9, "line-dasharray": [2, 1.5] },
+        paint: { "line-color": ACCENT, "line-width": 2.5, "line-dasharray": [2, 1.5] },
       });
       loadedRef.current = true;
     });
@@ -258,14 +272,14 @@ export default function FlightMap({ flight, clockMs, rightInset, onMarkerClick }
     const bounds = new LngLatBounds();
 
     if (dep.lat !== null && dep.lon !== null) {
-      const marker = new Marker({ element: buildAirportMarkerElement("#4fd1ff", dep.iata ?? dep.icao ?? dep.name) })
+      const marker = new Marker({ element: buildAirportMarkerElement(ACCENT, dep.iata ?? dep.icao ?? dep.name) })
         .setLngLat([dep.lon, dep.lat])
         .addTo(map);
       airportMarkersRef.current.push(marker);
       bounds.extend([dep.lon, dep.lat]);
     }
     if (arr.lat !== null && arr.lon !== null) {
-      const marker = new Marker({ element: buildAirportMarkerElement("#ff6b6b", arr.iata ?? arr.icao ?? arr.name) })
+      const marker = new Marker({ element: buildAirportMarkerElement(INK, arr.iata ?? arr.icao ?? arr.name) })
         .setLngLat([arr.lon, arr.lat])
         .addTo(map);
       airportMarkersRef.current.push(marker);
@@ -311,11 +325,17 @@ export default function FlightMap({ flight, clockMs, rightInset, onMarkerClick }
       bounds.extend([position.lon, position.lat]);
     }
 
-    if (hasFramedFlight.current !== flight.number && !bounds.isEmpty()) {
-      hasFramedFlight.current = flight.number;
+    const frameId = `${framingKeyRef.current}|${flight.number}|${flight.departure.scheduledUtc ?? ""}`;
+    if (hasFramedFlight.current !== frameId && !bounds.isEmpty()) {
+      hasFramedFlight.current = frameId;
       suppressAutoCenterRef.current = true;
       map.fitBounds(bounds, {
-        padding: { top: 80, bottom: 80, left: 80, right: 80 + rightInsetRef.current },
+        padding: {
+          top: Math.max(80, insetsRef.current.top + 32),
+          bottom: 80 + insetsRef.current.bottom,
+          left: 80,
+          right: 80 + insetsRef.current.right,
+        },
         maxZoom: 6,
         duration: 1200,
       });

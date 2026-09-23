@@ -1,4 +1,5 @@
 import { greatCircleInterpolate, initialBearing, type LatLon } from "./geo";
+import { flightPhase, parseApiTime, type FlightPhase } from "./flightStatus";
 import type { FlightResult } from "./types";
 
 export interface FlightPosition {
@@ -9,50 +10,53 @@ export interface FlightPosition {
   isLive: boolean;
 }
 
-/** Progress fraction (0-1) to assume for a flight when exact times aren't available. */
-const STATUS_FALLBACK_FRACTION: Record<string, number> = {
-  Unknown: 0,
-  Expected: 0,
-  CheckIn: 0,
-  Boarding: 0,
-  GateClosed: 0,
-  Departed: 0.05,
-  Delayed: 0.5,
-  EnRoute: 0.5,
-  Approaching: 0.95,
-  Arrived: 1,
-  Diverted: 0.5,
-  Canceled: 0,
-  CanceledUncertain: 0,
-};
-
-function timeMs(iso: string | null): number | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  return Number.isNaN(t) ? null : t;
-}
-
 export interface FlightProgress {
-  /** 0-1 fraction along the route; falls back to a per-status estimate without usable times. */
-  fraction: number;
+  /** 0-1 fraction along the route; null when the route no longer describes the trip (canceled or diverted). */
+  fraction: number | null;
   depTimeMs: number | null;
   arrTimeMs: number | null;
+  phase: FlightPhase;
 }
+
+// Keeps an airborne flight visibly between the endpoints when the clock says it
+// should already have landed (running late) or hasn't left yet (departed early).
+const AIRBORNE_MIN_FRACTION = 0.02;
+const AIRBORNE_MAX_FRACTION = 0.98;
 
 /**
  * Shared by the map marker's position and the details panel's progress bar, so both
- * always agree on where the flight is along its route.
+ * always agree on where the flight is along its route. Status wins over the clock:
+ * a flight still at the gate stays at 0 however late it is, and a canceled flight
+ * gets no progress at all rather than one that runs to arrival on schedule.
  */
 export function getFlightProgress(flight: FlightResult): FlightProgress {
-  const depTimeMs = timeMs(flight.departure.revisedUtc ?? flight.departure.scheduledUtc);
-  const arrTimeMs = timeMs(flight.arrival.revisedUtc ?? flight.arrival.scheduledUtc);
+  const depTimeMs = parseApiTime(flight.departure.revisedUtc ?? flight.departure.scheduledUtc);
+  const arrTimeMs = parseApiTime(flight.arrival.revisedUtc ?? flight.arrival.scheduledUtc);
+  const phase = flightPhase(flight);
+  const timeFraction =
+    depTimeMs !== null && arrTimeMs !== null && arrTimeMs > depTimeMs
+      ? (Date.now() - depTimeMs) / (arrTimeMs - depTimeMs)
+      : null;
 
-  if (depTimeMs !== null && arrTimeMs !== null && arrTimeMs > depTimeMs) {
-    const f = (Date.now() - depTimeMs) / (arrTimeMs - depTimeMs);
-    return { fraction: Math.min(1, Math.max(0, f)), depTimeMs, arrTimeMs };
+  let fraction: number | null;
+  switch (phase) {
+    case "canceled":
+    case "diverted":
+      fraction = null;
+      break;
+    case "landed":
+      fraction = 1;
+      break;
+    case "pre-departure":
+      fraction = 0;
+      break;
+    case "airborne":
+      fraction = Math.min(AIRBORNE_MAX_FRACTION, Math.max(AIRBORNE_MIN_FRACTION, timeFraction ?? 0.5));
+      break;
+    default:
+      fraction = timeFraction === null ? 0 : Math.min(1, Math.max(0, timeFraction));
   }
-
-  return { fraction: STATUS_FALLBACK_FRACTION[flight.status] ?? 0.5, depTimeMs, arrTimeMs };
+  return { fraction, depTimeMs, arrTimeMs, phase };
 }
 
 export function getFlightPosition(flight: FlightResult): FlightPosition | null {
@@ -74,6 +78,7 @@ export function getFlightPosition(flight: FlightResult): FlightPosition | null {
   const start: LatLon = { lat: dep.lat, lon: dep.lon };
   const end: LatLon = { lat: arr.lat, lon: arr.lon };
   const f = getFlightProgress(flight).fraction;
+  if (f === null) return null;
   const point = greatCircleInterpolate(start, end, f);
 
   // Estimate heading using the local tangent of the route rather than the

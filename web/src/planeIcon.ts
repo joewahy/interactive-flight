@@ -1,6 +1,6 @@
 // Fills whatever box its container sets (see e.g. FlightMap's resizable plane marker
-// and DetailsPanel's fixed-size route badge) rather than a fixed pixel size of its own.
-/** Shared plane glyph: the live/estimated marker on the map and the route badge in the details panel. */
+// and DetailsPanel's progress bar) rather than a fixed pixel size of its own.
+/** Shared plane glyph: the live/estimated marker on the map and the progress bar marker in the details panel. */
 export function planeIconSvg(color: string): string {
   return `
     <svg width="100%" height="100%" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
