@@ -69,6 +69,9 @@ export default function App() {
   const [searchCardBottom, setSearchCardBottom] = useState(0);
   // Bumped per search so the map re-frames the route even when the same flight is searched again.
   const [searchCount, setSearchCount] = useState(0);
+  // Bumped per pick in the flight picker, so switching between results always re-frames
+  // (results can share a flight number and lack a UTC time, which would otherwise look identical).
+  const [pickCount, setPickCount] = useState(0);
   const closeDetails = useCallback(() => setShowDetails(false), []);
 
   const selectedFlight = flights[selectedIndex] ?? null;
@@ -169,7 +172,7 @@ export default function App() {
           flight={selectedFlight}
           clockMs={clockMs}
           insets={mapInsets}
-          framingKey={searchCount}
+          framingKey={`${searchCount}-${pickCount}`}
           onMarkerClick={() => setShowDetails(true)}
         />
       </Suspense>
@@ -185,7 +188,10 @@ export default function App() {
               <button
                 key={`${f.number}-${f.departure.scheduledUtc ?? i}`}
                 className={i === selectedIndex ? "active" : ""}
-                onClick={() => setSelectedIndex(i)}
+                onClick={() => {
+                  setSelectedIndex(i);
+                  setPickCount((n) => n + 1);
+                }}
               >
                 {f.departure.airport.iata ?? "?"} → {f.arrival.airport.iata ?? "?"} ·{" "}
                 {f.departure.scheduledLocal?.slice(0, 10) ?? "unknown date"}

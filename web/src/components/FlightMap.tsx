@@ -162,8 +162,8 @@ interface Props {
   clockMs: number;
   /** Space covered by the search card (top), details panel (right) or phone sheet (bottom), kept clear when framing the route. */
   insets: { top: number; right: number; bottom: number };
-  /** Changes on each new search; the route is framed once per key rather than per refresh. */
-  framingKey: number;
+  /** Changes on each new search or pick; the route is framed once per key rather than per refresh. */
+  framingKey: string;
   onMarkerClick: () => void;
 }
 
@@ -328,7 +328,6 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     const frameId = `${framingKeyRef.current}|${flight.number}|${flight.departure.scheduledUtc ?? ""}`;
     if (hasFramedFlight.current !== frameId && !bounds.isEmpty()) {
       hasFramedFlight.current = frameId;
-      suppressAutoCenterRef.current = true;
       map.fitBounds(bounds, {
         padding: {
           top: Math.max(80, insetsRef.current.top + 32),
@@ -336,9 +335,12 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
           left: 80,
           right: 80 + insetsRef.current.right,
         },
-        maxZoom: 6,
+        maxZoom: 9,
         duration: 1200,
       });
+      // Set after fitBounds: interrupting a still-running earlier framing fires that one's
+      // "moveend" synchronously, which would otherwise clear this before our animation ends.
+      suppressAutoCenterRef.current = true;
       map.once("moveend", () => {
         suppressAutoCenterRef.current = false;
       });
