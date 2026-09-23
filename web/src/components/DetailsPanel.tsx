@@ -79,13 +79,15 @@ function RouteTimes({ movement, align }: { movement: Movement; align: "left" | "
   const meta = movementMeta(movement);
   return (
     <div className={`route-times-col ${align}`}>
-      <div className="route-time-row">
-        <span className="dim">Scheduled</span>
-        <span>{formatClockTime(movement.scheduledLocal)}</span>
+      <div className="route-time-box">
+        <span className="route-time-label">Scheduled</span>
+        <span className="route-time-value">{formatClockTime(movement.scheduledLocal)}</span>
       </div>
-      <div className="route-time-row">
-        <span className="dim">{movementStatusLabel(movement)}</span>
-        <span className="emphasis">{formatClockTime(movement.revisedLocal ?? movement.scheduledLocal)}</span>
+      <div className="route-time-box">
+        <span className="route-time-label">{movementStatusLabel(movement)}</span>
+        <span className="route-time-value emphasis">
+          {formatClockTime(movement.revisedLocal ?? movement.scheduledLocal)}
+        </span>
       </div>
       {meta && <p className="route-meta dim">{meta}</p>}
     </div>
