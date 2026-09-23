@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { AttributionControl, Map as MaplibreMap, Marker, NavigationControl, LngLatBounds, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import type { FeatureCollection } from "geojson";
 import type { FlightResult } from "../types";
 import { getFlightPosition } from "../flightPosition";
 import { greatCircleInterpolate, type LatLon } from "../geo";
@@ -221,7 +222,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     map.on("zoom", () => applyPlaneIconSize(planeMarkerRef.current, map.getZoom()));
 
     map.on("load", () => {
-      map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: emptyRoute() as GeoJSON.FeatureCollection });
+      map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: emptyRoute() as FeatureCollection });
       map.addLayer({
         id: `${ROUTE_SOURCE_ID}-casing`,
         type: "line",
@@ -261,7 +262,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     const routeSource = map.getSource(ROUTE_SOURCE_ID) as GeoJSONSource | undefined;
     if (!flight) {
       removePlaneMarker();
-      routeSource?.setData(emptyRoute() as GeoJSON.FeatureCollection);
+      routeSource?.setData(emptyRoute() as FeatureCollection);
       hasFramedFlight.current = null;
       planePositionRef.current = null;
       return;
@@ -296,9 +297,9 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
       routeSource?.setData({
         type: "FeatureCollection",
         features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } }],
-      } as GeoJSON.FeatureCollection);
+      } as FeatureCollection);
     } else {
-      routeSource?.setData(emptyRoute() as GeoJSON.FeatureCollection);
+      routeSource?.setData(emptyRoute() as FeatureCollection);
     }
     const planeMarkerKey = position ? `${flight.number}|${position.isLive}` : null;
     if (planeMarkerKey === null || planeMarkerKey !== planeMarkerKeyRef.current) removePlaneMarker();
