@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSPrope
 import SearchBar from "./components/SearchBar";
 import DetailsPanel from "./components/DetailsPanel";
 import { fetchFlightByNumber, ApiError } from "./api";
-import { parseApiTime } from "./flightStatus";
+import { flightPhase, parseApiTime } from "./flightStatus";
 import type { FlightResult } from "./types";
 import "./App.css";
 
@@ -35,6 +35,12 @@ function shouldAutoRefresh(flight: FlightResult, now: number): boolean {
 /** Identifies one leg across refreshes, since a flight number can cover several days' legs. */
 function flightKey(flight: FlightResult): string {
   return `${flight.number}|${flight.departure.scheduledUtc ?? ""}`;
+}
+
+/** Prefers the leg currently in the air; falls back to the first result otherwise. */
+function defaultResultIndex(results: FlightResult[]): number {
+  const airborneIndex = results.findIndex((f) => flightPhase(f) === "airborne");
+  return airborneIndex === -1 ? 0 : airborneIndex;
 }
 
 function useMediaQuery(query: string): boolean {
@@ -148,7 +154,7 @@ export default function App() {
         setError(`No flights found for "${flightNumber}".`);
       } else {
         setFlights(results);
-        setSelectedIndex(0);
+        setSelectedIndex(defaultResultIndex(results));
         setShowDetails(true);
         setSuccess(
           results.length === 1
