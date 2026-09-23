@@ -48,7 +48,7 @@ interface RawFlight {
     reg?: string | null;
     model?: string | null;
     modeS?: string | null;
-    image?: { url?: string; author?: string; title?: string };
+    image?: { url?: string; webUrl?: string; author?: string; title?: string; description?: string };
   };
   location?: {
     lat: number;
@@ -96,7 +96,7 @@ export interface FlightResult {
     reg: string | null;
     model: string | null;
     modeS: string | null;
-    imageUrl: string | null;
+    image: { url: string; author: string | null; pageUrl: string | null } | null;
   } | null;
   departure: Movement;
   arrival: Movement;
@@ -139,6 +139,36 @@ function normalizeMovement(m: RawMovement): Movement {
   };
 }
 
+const squash = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * The model's type code, e.g. "A321" from "Airbus A321 (Sharklets)" or "737" from
+ * "Boeing 737-800": the first word containing a digit, minus any variant suffix.
+ */
+function modelTypeCode(model: string): string | null {
+  const word = model.split(/\s+/).find((w) => /\d/.test(w));
+  if (!word) return null;
+  const base = word.split("-")[0];
+  return squash(/\d/.test(base) ? base : word) || null;
+}
+
+/**
+ * AeroDataBox picks aircraft photos loosely (an A321 once came back with an A400M
+ * airshow photo), so only keep one whose title or description names this aircraft's
+ * registration or type code.
+ */
+function matchingAircraftImage(
+  aircraft: NonNullable<RawFlight["aircraft"]>
+): { url: string; author: string | null; pageUrl: string | null } | null {
+  const image = aircraft.image;
+  if (!image?.url) return null;
+  const caption = squash(`${image.title ?? ""} ${image.description ?? ""}`);
+  const reg = aircraft.reg ? squash(aircraft.reg) : null;
+  const typeCode = aircraft.model ? modelTypeCode(aircraft.model) : null;
+  const matches = (reg && caption.includes(reg)) || (typeCode && caption.includes(typeCode));
+  return matches ? { url: image.url, author: image.author ?? null, pageUrl: image.webUrl ?? null } : null;
+}
+
 function normalizeFlight(f: RawFlight): FlightResult {
   return {
     number: f.number,
@@ -154,7 +184,7 @@ function normalizeFlight(f: RawFlight): FlightResult {
           reg: f.aircraft.reg ?? null,
           model: f.aircraft.model ?? null,
           modeS: f.aircraft.modeS ?? null,
-          imageUrl: f.aircraft.image?.url ?? null,
+          image: matchingAircraftImage(f.aircraft),
         }
       : null,
     departure: normalizeMovement(f.departure),

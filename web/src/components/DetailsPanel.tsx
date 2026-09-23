@@ -182,10 +182,23 @@ export default function DetailsPanel({ flight, onClose }: Props) {
         <p className="status-badge">{flight.status}</p>
       </div>
 
-      {flight.aircraft?.imageUrl && (
-        <div className="aircraft-photo">
-          <img src={flight.aircraft.imageUrl} alt={flight.aircraft.model ?? "Aircraft"} loading="lazy" />
-        </div>
+      {flight.aircraft?.image && (
+        <figure className="aircraft-photo">
+          <img src={flight.aircraft.image.url} alt={flight.aircraft.model ?? "Aircraft"} loading="lazy" />
+          {flight.aircraft.image.author && (
+            <figcaption>
+              Photo:{" "}
+              {flight.aircraft.image.pageUrl ? (
+                <a href={flight.aircraft.image.pageUrl} target="_blank" rel="noopener noreferrer">
+                  {flight.aircraft.image.author}
+                </a>
+              ) : (
+                flight.aircraft.image.author
+              )}
+              , CC BY
+            </figcaption>
+          )}
+        </figure>
       )}
 
       <div className="route-header">

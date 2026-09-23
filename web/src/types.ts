@@ -33,7 +33,7 @@ export interface FlightResult {
     reg: string | null;
     model: string | null;
     modeS: string | null;
-    imageUrl: string | null;
+    image: { url: string; author: string | null; pageUrl: string | null } | null;
   } | null;
   departure: Movement;
   arrival: Movement;
