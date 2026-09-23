@@ -347,12 +347,27 @@ export async function fetchFlightsByNumber(
 // An airframe's age, seats and engines don't change between searches, so each
 // registration is looked up at most once a day to spare the RapidAPI quota.
 const AIRCRAFT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const aircraftCache = new Map<string, { details: AircraftDetails | null; expiresAt: number }>();
+
+/** A per-key TTL cache; `get` returns undefined for an absent or expired entry. */
+function ttlCache<T>(ttlMs: number) {
+  const entries = new Map<string, { value: T; expiresAt: number }>();
+  return {
+    get(key: string): T | undefined {
+      const cached = entries.get(key);
+      return cached && cached.expiresAt > Date.now() ? cached.value : undefined;
+    },
+    set(key: string, value: T): void {
+      entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+    },
+  };
+}
+
+const aircraftCache = ttlCache<AircraftDetails | null>(AIRCRAFT_CACHE_TTL_MS);
 
 /** Best-effort: any failure resolves to null rather than failing the flight search. */
 async function fetchAircraftDetails(apiKey: string, reg: string): Promise<AircraftDetails | null> {
   const cached = aircraftCache.get(reg);
-  if (cached && cached.expiresAt > Date.now()) return cached.details;
+  if (cached !== undefined) return cached;
 
   try {
     const res = await fetch(`${API_BASE}/aircrafts/reg/${encodeURIComponent(reg)}`, {
@@ -361,7 +376,7 @@ async function fetchAircraftDetails(apiKey: string, reg: string): Promise<Aircra
     // 204/404 mean AeroDataBox doesn't know this airframe; worth caching. Other
     // errors may be transient, so they're retried on the next search.
     if (res.status === 204 || res.status === 404) {
-      aircraftCache.set(reg, { details: null, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+      aircraftCache.set(reg, null);
       return null;
     }
     if (!res.ok) return null;
@@ -375,14 +390,14 @@ async function fetchAircraftDetails(apiKey: string, reg: string): Promise<Aircra
       numEngines: raw.numEngines ?? null,
       engineType: raw.engineType ?? null,
     };
-    aircraftCache.set(reg, { details, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+    aircraftCache.set(reg, details);
     return details;
   } catch {
     return null;
   }
 }
 
-const imageCache = new Map<string, { image: AircraftImage | null; expiresAt: number }>();
+const imageCache = ttlCache<AircraftImage | null>(AIRCRAFT_CACHE_TTL_MS);
 
 /**
  * Best-effort photo of this exact airframe, used when the flight's own photo is only a
@@ -390,21 +405,21 @@ const imageCache = new Map<string, { image: AircraftImage | null; expiresAt: num
  */
 async function fetchRegistrationImage(apiKey: string, reg: string): Promise<AircraftImage | null> {
   const cached = imageCache.get(reg);
-  if (cached && cached.expiresAt > Date.now()) return cached.image;
+  if (cached !== undefined) return cached;
 
   try {
     const res = await fetch(`${API_BASE}/aircrafts/reg/${encodeURIComponent(reg)}/image/beta`, {
       headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": API_HOST },
     });
     if (res.status === 204 || res.status === 404) {
-      imageCache.set(reg, { image: null, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+      imageCache.set(reg, null);
       return null;
     }
     if (!res.ok) return null;
 
     const raw = (await res.json()) as RawImage;
     const image = showsRegistration(raw, reg) ? toAircraftImage(raw) : null;
-    imageCache.set(reg, { image, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+    imageCache.set(reg, image);
     return image;
   } catch {
     return null;

@@ -141,6 +141,14 @@ function buildTooltipElement(text: string): HTMLDivElement {
   return tooltip;
 }
 
+/** Appends a hover tooltip to `element`, shown only while the pointer is over it. */
+function attachTooltip(element: HTMLElement, text: string): void {
+  const tooltip = buildTooltipElement(text);
+  element.appendChild(tooltip);
+  element.addEventListener("mouseenter", () => (tooltip.style.opacity = "1"));
+  element.addEventListener("mouseleave", () => (tooltip.style.opacity = "0"));
+}
+
 function buildAirportMarkerElement(color: string, label: string): HTMLDivElement {
   const content = document.createElement("div");
   content.style.cssText = `
@@ -152,10 +160,7 @@ function buildAirportMarkerElement(color: string, label: string): HTMLDivElement
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     cursor: default;
   `;
-  const tooltip = buildTooltipElement(label);
-  content.appendChild(tooltip);
-  content.addEventListener("mouseenter", () => (tooltip.style.opacity = "1"));
-  content.addEventListener("mouseleave", () => (tooltip.style.opacity = "0"));
+  attachTooltip(content, label);
   return content;
 }
 
@@ -187,10 +192,7 @@ function buildPlaneMarkerElement(
   icon.innerHTML = planeIconSvg(isLive ? ACCENT : ESTIMATE);
   wrapper.appendChild(icon);
 
-  const tooltip = buildTooltipElement(flightNumber);
-  wrapper.appendChild(tooltip);
-  wrapper.addEventListener("mouseenter", () => (tooltip.style.opacity = "1"));
-  wrapper.addEventListener("mouseleave", () => (tooltip.style.opacity = "0"));
+  attachTooltip(wrapper, flightNumber);
   wrapper.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
