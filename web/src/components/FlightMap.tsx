@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { AttributionControl, Map as MaplibreMap, Marker, NavigationControl, LngLatBounds, type GeoJSONSource } from "maplibre-gl";
+import { AttributionControl, type IControl, Map as MaplibreMap, Marker, NavigationControl, LngLatBounds, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
 import type { FlightResult } from "../types";
@@ -43,6 +43,47 @@ function applyPlaneIconSize(marker: Marker | null, zoom: number) {
   wrapper.style.height = size;
   icon.style.width = size;
   icon.style.height = size;
+}
+
+/** Top-right map button that pans back to the plane, keeping the current zoom. */
+class CenterOnPlaneControl implements IControl {
+  private container: HTMLDivElement | null = null;
+  private readonly onClick: () => void;
+
+  constructor(onClick: () => void) {
+    this.onClick = onClick;
+  }
+
+  onAdd(): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "center-on-plane";
+    button.title = "Center on plane";
+    button.setAttribute("aria-label", "Center on plane");
+    button.innerHTML = `
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="6" />
+        <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+      </svg>`;
+    button.addEventListener("click", this.onClick);
+    container.appendChild(button);
+    this.container = container;
+    this.setEnabled(false);
+    return container;
+  }
+
+  onRemove(): void {
+    this.container?.remove();
+    this.container = null;
+  }
+
+  /** Hidden while there's no plane on the map to center on. */
+  setEnabled(enabled: boolean) {
+    if (this.container) this.container.hidden = !enabled;
+  }
 }
 
 interface RouteFeatureCollection {
@@ -185,13 +226,9 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
   insetsRef.current = insets;
   const framingKeyRef = useRef(framingKey);
   framingKeyRef.current = framingKey;
-  // Current plane position, kept centered whenever the user zooms (see the
-  // "zoomend" handler below) so tracking a flight doesn't require re-finding
-  // the plane after every zoom step.
+  // Current plane position, for the center-on-plane control.
   const planePositionRef = useRef<{ lon: number; lat: number } | null>(null);
-  // Suppressed during our own fitBounds framing, so it doesn't immediately
-  // override that framing's own zoom animation.
-  const suppressAutoCenterRef = useRef(false);
+  const centerControlRef = useRef<CenterOnPlaneControl | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -207,16 +244,17 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     // On phones the sheet covers the bottom instead; App.css lifts this corner above it.
     map.addControl(new NavigationControl({ showCompass: false }), "bottom-left");
     map.addControl(new AttributionControl({ compact: true }), "bottom-left");
-    mapRef.current = map;
-
-    // Keep the plane centered through zoom in/out: MapLibre's default scroll/pinch
-    // zoom anchors to the cursor, which walks the plane off-screen after a few
-    // steps, so re-center on it once each zoom gesture settles.
-    map.on("zoomend", () => {
-      if (suppressAutoCenterRef.current) return;
+    // App.css moves this corner clear of the details panel (desktop) or search card (phones).
+    const centerControl = new CenterOnPlaneControl(() => {
       const pos = planePositionRef.current;
-      if (pos) map.easeTo({ center: [pos.lon, pos.lat], duration: 300 });
+      if (!pos) return;
+      // An offset rather than `padding`, which MapLibre would keep applying to every later camera move.
+      const { top, right, bottom } = insetsRef.current;
+      map.easeTo({ center: [pos.lon, pos.lat], offset: [-right / 2, (top - bottom) / 2], duration: 600 });
     });
+    map.addControl(centerControl, "top-right");
+    centerControlRef.current = centerControl;
+    mapRef.current = map;
 
     // Continuous, not zoomend-only, so the icon grows smoothly as the gesture happens.
     map.on("zoom", () => applyPlaneIconSize(planeMarkerRef.current, map.getZoom()));
@@ -243,6 +281,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     return () => {
       map.remove();
       mapRef.current = null;
+      centerControlRef.current = null;
       loadedRef.current = false;
     };
   }, []);
@@ -265,6 +304,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
       routeSource?.setData(emptyRoute() as FeatureCollection);
       hasFramedFlight.current = null;
       planePositionRef.current = null;
+      centerControlRef.current?.setEnabled(false);
       return;
     }
 
@@ -289,6 +329,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
 
     const position = getFlightPosition(flight);
     planePositionRef.current = position ? { lon: position.lon, lat: position.lat } : null;
+    centerControlRef.current?.setEnabled(position !== null);
 
     // Only the flown portion (departure through the current position) is drawn, not
     // the rest of the route to arrival — the plane hasn't flown that yet.
@@ -336,14 +377,8 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
           left: 80,
           right: 80 + insetsRef.current.right,
         },
-        maxZoom: 9,
+        maxZoom: 6,
         duration: 1200,
-      });
-      // Set after fitBounds: interrupting a still-running earlier framing fires that one's
-      // "moveend" synchronously, which would otherwise clear this before our animation ends.
-      suppressAutoCenterRef.current = true;
-      map.once("moveend", () => {
-        suppressAutoCenterRef.current = false;
       });
     }
   }, [flight, clockMs]);

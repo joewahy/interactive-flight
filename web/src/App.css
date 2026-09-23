@@ -27,6 +27,22 @@
   transition: bottom 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Kept clear of the details panel on the right (--map-inset-right is set on .app). */
+.flight-map .maplibregl-ctrl-top-right {
+  right: var(--map-inset-right, 0px);
+}
+
+.flight-map .center-on-plane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+
+.flight-map .center-on-plane:hover {
+  color: var(--accent-strong);
+}
+
 .flight-map .maplibregl-ctrl-group {
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow);
@@ -618,6 +634,10 @@
   margin: 0 0 16px;
 }
 
+.details-top + .aircraft-photo {
+  margin: 16px 0 0;
+}
+
 .aircraft-photo img {
   display: block;
   width: 100%;
@@ -747,6 +767,11 @@
   .overlay.top h1 {
     font-size: 16px;
     margin-bottom: 8px;
+  }
+
+  /* The search card spans the top edge on phones; sit just below it. */
+  .flight-map .maplibregl-ctrl-top-right {
+    top: var(--map-inset-top, 0px);
   }
 }
 

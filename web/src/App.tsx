@@ -166,7 +166,13 @@ export default function App() {
   }
 
   return (
-    <div className="app" style={{ "--map-inset-bottom": `${mapInsets.bottom}px` } as CSSProperties}>
+    <div className="app" style={
+        {
+          "--map-inset-top": `${mapInsets.top}px`,
+          "--map-inset-right": `${mapInsets.right}px`,
+          "--map-inset-bottom": `${mapInsets.bottom}px`,
+        } as CSSProperties
+      }>
       <Suspense fallback={<div className="map-loading">Loading map...</div>}>
         <FlightMap
           flight={selectedFlight}
