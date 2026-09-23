@@ -468,6 +468,25 @@
   color: var(--text-dim);
 }
 
+.section .aircraft-facts {
+  margin-top: 8px;
+}
+
+.live-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.live-stat-sub {
+  font-size: 11px;
+}
+
+.section .live-reported {
+  margin-top: 8px;
+  font-size: 11px;
+}
+
 .weather-line {
   font-size: 13px;
 }

@@ -85,6 +85,25 @@ export interface Movement {
   baggageBelt: string | null;
 }
 
+/** Per-airframe facts from AeroDataBox's aircraft lookup (by registration). */
+export interface AircraftDetails {
+  ageYears: number | null;
+  firstFlightDate: string | null;
+  deliveryDate: string | null;
+  numSeats: number | null;
+  numEngines: number | null;
+  engineType: string | null;
+}
+
+interface RawAircraftDetails {
+  ageYears?: number | null;
+  firstFlightDate?: string | null;
+  deliveryDate?: string | null;
+  numSeats?: number | null;
+  numEngines?: number | null;
+  engineType?: string | null;
+}
+
 export interface FlightResult {
   number: string;
   callSign: string | null;
@@ -97,6 +116,7 @@ export interface FlightResult {
     model: string | null;
     modeS: string | null;
     image: { url: string; author: string | null; pageUrl: string | null } | null;
+    details: AircraftDetails | null;
   } | null;
   departure: Movement;
   arrival: Movement;
@@ -185,6 +205,7 @@ function normalizeFlight(f: RawFlight): FlightResult {
           model: f.aircraft.model ?? null,
           modeS: f.aircraft.modeS ?? null,
           image: matchingAircraftImage(f.aircraft),
+          details: null,
         }
       : null,
     departure: normalizeMovement(f.departure),
@@ -234,5 +255,52 @@ export async function fetchFlightsByNumber(
   }
 
   const raw = (await res.json()) as RawFlight[];
-  return raw.map(normalizeFlight);
+  const flights = raw.map(normalizeFlight);
+
+  const regs = [...new Set(flights.map((f) => f.aircraft?.reg).filter((r): r is string => !!r))];
+  const detailsByReg = new Map(
+    await Promise.all(regs.map(async (reg) => [reg, await fetchAircraftDetails(apiKey, reg)] as const))
+  );
+  for (const f of flights) {
+    if (f.aircraft?.reg) f.aircraft.details = detailsByReg.get(f.aircraft.reg) ?? null;
+  }
+  return flights;
+}
+
+// An airframe's age, seats and engines don't change between searches, so each
+// registration is looked up at most once a day to spare the RapidAPI quota.
+const AIRCRAFT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const aircraftCache = new Map<string, { details: AircraftDetails | null; expiresAt: number }>();
+
+/** Best-effort: any failure resolves to null rather than failing the flight search. */
+async function fetchAircraftDetails(apiKey: string, reg: string): Promise<AircraftDetails | null> {
+  const cached = aircraftCache.get(reg);
+  if (cached && cached.expiresAt > Date.now()) return cached.details;
+
+  try {
+    const res = await fetch(`${API_BASE}/aircrafts/reg/${encodeURIComponent(reg)}`, {
+      headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": API_HOST },
+    });
+    // 204/404 mean AeroDataBox doesn't know this airframe; worth caching. Other
+    // errors may be transient, so they're retried on the next search.
+    if (res.status === 204 || res.status === 404) {
+      aircraftCache.set(reg, { details: null, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+      return null;
+    }
+    if (!res.ok) return null;
+
+    const raw = (await res.json()) as RawAircraftDetails;
+    const details: AircraftDetails = {
+      ageYears: raw.ageYears ?? null,
+      firstFlightDate: raw.firstFlightDate ?? null,
+      deliveryDate: raw.deliveryDate ?? null,
+      numSeats: raw.numSeats ?? null,
+      numEngines: raw.numEngines ?? null,
+      engineType: raw.engineType ?? null,
+    };
+    aircraftCache.set(reg, { details, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+    return details;
+  } catch {
+    return null;
+  }
 }

@@ -34,6 +34,14 @@ export interface FlightResult {
     model: string | null;
     modeS: string | null;
     image: { url: string; author: string | null; pageUrl: string | null } | null;
+    details: {
+      ageYears: number | null;
+      firstFlightDate: string | null;
+      deliveryDate: string | null;
+      numSeats: number | null;
+      numEngines: number | null;
+      engineType: string | null;
+    } | null;
   } | null;
   departure: Movement;
   arrival: Movement;
