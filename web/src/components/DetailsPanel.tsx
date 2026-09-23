@@ -299,17 +299,29 @@ function AircraftPhoto({ aircraft }: { aircraft: NonNullable<FlightResult["aircr
   return (
     <figure className="aircraft-photo">
       <img src={image.url} alt={aircraft.model ? `A ${aircraft.model}` : "The aircraft"} loading="lazy" />
-      {image.author && (
+      {(image.author || image.license) && (
         <figcaption>
-          Photo:{" "}
-          {image.pageUrl ? (
-            <a href={image.pageUrl} target="_blank" rel="noopener noreferrer">
-              {image.author}
-            </a>
-          ) : (
-            image.author
+          Photo: {image.title && <>“{image.title}”{image.author ? " by " : ""}</>}
+          {image.author &&
+            (image.pageUrl ? (
+              <a href={image.pageUrl} target="_blank" rel="noopener noreferrer">
+                {image.author}
+              </a>
+            ) : (
+              image.author
+            ))}
+          {image.license && (
+            <>
+              {image.title || image.author ? ", " : ""}
+              {image.license.url ? (
+                <a href={image.license.url} target="_blank" rel="noopener noreferrer license">
+                  {image.license.name}
+                </a>
+              ) : (
+                image.license.name
+              )}
+            </>
           )}
-          , CC BY
         </figcaption>
       )}
     </figure>
@@ -449,10 +461,6 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
       aria-labelledby={titleId}
       style={collapsed && peekHeight !== null ? { maxHeight: peekHeight } : undefined}
     >
-      {/* Leads the side panel. The phone sheet's peek has no room for it, so there it
-          opens the expanded part instead. */}
-      {variant === "side" && flight.aircraft && <AircraftPhoto aircraft={flight.aircraft} />}
-
       <div ref={peekRef} className="details-peek">
       {variant === "sheet" && (
         <button
@@ -475,6 +483,10 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
           <CloseIcon />
         </button>
       </div>
+
+      {/* Sits under the title in the side panel. The phone sheet's peek has no room for
+          it, so there it opens the expanded part instead. */}
+      {variant === "side" && flight.aircraft && <AircraftPhoto aircraft={flight.aircraft} />}
 
       <StatusBlock flight={flight} lastUpdatedMs={lastUpdatedMs} autoRefresh={autoRefresh} />
       </div>

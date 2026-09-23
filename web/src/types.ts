@@ -33,7 +33,13 @@ export interface FlightResult {
     reg: string | null;
     model: string | null;
     modeS: string | null;
-    image: { url: string; author: string | null; pageUrl: string | null } | null;
+    image: {
+      url: string;
+      author: string | null;
+      pageUrl: string | null;
+      title: string | null;
+      license: { name: string; url: string | null } | null;
+    } | null;
     details: {
       ageYears: number | null;
       firstFlightDate: string | null;

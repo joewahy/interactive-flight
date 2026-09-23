@@ -35,6 +35,16 @@ interface RawMovement {
   baggageBelt?: string | null;
 }
 
+interface RawImage {
+  url?: string;
+  webUrl?: string;
+  author?: string;
+  title?: string;
+  description?: string;
+  license?: string;
+  htmlAttributions?: string[];
+}
+
 interface RawFlight {
   number: string;
   callSign?: string | null;
@@ -48,7 +58,7 @@ interface RawFlight {
     reg?: string | null;
     model?: string | null;
     modeS?: string | null;
-    image?: { url?: string; webUrl?: string; author?: string; title?: string; description?: string };
+    image?: RawImage;
   };
   location?: {
     lat: number;
@@ -104,6 +114,15 @@ interface RawAircraftDetails {
   engineType?: string | null;
 }
 
+export interface AircraftImage {
+  url: string;
+  author: string | null;
+  pageUrl: string | null;
+  title: string | null;
+  /** e.g. { name: "CC BY-ND 2.0", url: "https://creativecommons.org/licenses/by-nd/2.0/" }; null when unknown. */
+  license: { name: string; url: string | null } | null;
+}
+
 export interface FlightResult {
   number: string;
   callSign: string | null;
@@ -115,7 +134,7 @@ export interface FlightResult {
     reg: string | null;
     model: string | null;
     modeS: string | null;
-    image: { url: string; author: string | null; pageUrl: string | null } | null;
+    image: AircraftImage | null;
     details: AircraftDetails | null;
   } | null;
   departure: Movement;
@@ -172,21 +191,66 @@ function modelTypeCode(model: string): string | null {
   return squash(/\d/.test(base) ? base : word) || null;
 }
 
+// AeroDataBox's license enum. AllRightsReserved is deliberately absent: those photos aren't shown.
+const LICENSE_NAMES: Record<string, string> = {
+  AttributionCC: "CC BY",
+  AttributionShareAlikeCC: "CC BY-SA",
+  AttributionNoDerivativesCC: "CC BY-ND",
+  AttributionNoncommercialCC: "CC BY-NC",
+  AttributionNoncommercialShareAlikeCC: "CC BY-NC-SA",
+  AttributionNoncommercialNoDerivativesCC: "CC BY-NC-ND",
+  PublicDomainDedicationCC0: "CC0",
+  PublicDomainMark: "Public domain",
+  NoKnownCopyrightRestrictions: "No known copyright restrictions",
+  UnitedStatesGovernmentWork: "United States government work",
+};
+
+/**
+ * The license's display name and link. The enum has no version, so that and the URL
+ * come from the license link in htmlAttributions (e.g. ".../licenses/by-nd/2.0/").
+ */
+function imageLicense(image: RawImage): AircraftImage["license"] {
+  const name = image.license ? LICENSE_NAMES[image.license] : undefined;
+  if (!name) return null;
+  const url =
+    (image.htmlAttributions ?? [])
+      .map((html) => html.match(/href=["'](https?:\/\/creativecommons\.org\/[^"']+)["']/)?.[1])
+      .find((u): u is string => !!u) ?? null;
+  const version = name.startsWith("CC BY") ? url?.match(/\/(\d+\.\d+)\/?$/)?.[1] : undefined;
+  return { name: version ? `${name} ${version}` : name, url };
+}
+
+const imageCaption = (image: RawImage) => squash(`${image.title ?? ""} ${image.description ?? ""}`);
+
+/** Whether the photo's title or description names this exact airframe. */
+function showsRegistration(image: RawImage | undefined, reg: string): boolean {
+  return !!image && imageCaption(image).includes(squash(reg));
+}
+
+function toAircraftImage(image: RawImage): AircraftImage | null {
+  if (!image.url || image.license === "AllRightsReserved") return null;
+  return {
+    url: image.url,
+    author: image.author ?? null,
+    pageUrl: image.webUrl ?? null,
+    title: image.title ?? null,
+    license: imageLicense(image),
+  };
+}
+
 /**
  * AeroDataBox picks aircraft photos loosely (an A321 once came back with an A400M
  * airshow photo), so only keep one whose title or description names this aircraft's
- * registration or type code.
+ * registration or type code. A type-code match can be another airline's plane, so
+ * fetchFlightsByNumber then looks for a photo of the exact registration.
  */
-function matchingAircraftImage(
-  aircraft: NonNullable<RawFlight["aircraft"]>
-): { url: string; author: string | null; pageUrl: string | null } | null {
+function matchingAircraftImage(aircraft: NonNullable<RawFlight["aircraft"]>): AircraftImage | null {
   const image = aircraft.image;
-  if (!image?.url) return null;
-  const caption = squash(`${image.title ?? ""} ${image.description ?? ""}`);
-  const reg = aircraft.reg ? squash(aircraft.reg) : null;
+  if (!image) return null;
   const typeCode = aircraft.model ? modelTypeCode(aircraft.model) : null;
-  const matches = (reg && caption.includes(reg)) || (typeCode && caption.includes(typeCode));
-  return matches ? { url: image.url, author: image.author ?? null, pageUrl: image.webUrl ?? null } : null;
+  const matches =
+    (aircraft.reg && showsRegistration(image, aircraft.reg)) || (typeCode && imageCaption(image).includes(typeCode));
+  return matches ? toAircraftImage(image) : null;
 }
 
 function normalizeFlight(f: RawFlight): FlightResult {
@@ -258,11 +322,24 @@ export async function fetchFlightsByNumber(
   const flights = raw.map(normalizeFlight);
 
   const regs = [...new Set(flights.map((f) => f.aircraft?.reg).filter((r): r is string => !!r))];
-  const detailsByReg = new Map(
-    await Promise.all(regs.map(async (reg) => [reg, await fetchAircraftDetails(apiKey, reg)] as const))
-  );
+  const regsWithoutOwnPhoto = [
+    ...new Set(
+      raw
+        .map((f) => f.aircraft)
+        .filter((a) => a?.reg && !showsRegistration(a.image, a.reg))
+        .map((a) => a!.reg!)
+    ),
+  ];
+  const [detailsByReg, imageByReg] = await Promise.all([
+    Promise.all(regs.map(async (reg) => [reg, await fetchAircraftDetails(apiKey, reg)] as const)).then((e) => new Map(e)),
+    Promise.all(regsWithoutOwnPhoto.map(async (reg) => [reg, await fetchRegistrationImage(apiKey, reg)] as const)).then(
+      (e) => new Map(e)
+    ),
+  ]);
   for (const f of flights) {
-    if (f.aircraft?.reg) f.aircraft.details = detailsByReg.get(f.aircraft.reg) ?? null;
+    if (!f.aircraft?.reg) continue;
+    f.aircraft.details = detailsByReg.get(f.aircraft.reg) ?? null;
+    f.aircraft.image = imageByReg.get(f.aircraft.reg) ?? f.aircraft.image;
   }
   return flights;
 }
@@ -300,6 +377,35 @@ async function fetchAircraftDetails(apiKey: string, reg: string): Promise<Aircra
     };
     aircraftCache.set(reg, { details, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
     return details;
+  } catch {
+    return null;
+  }
+}
+
+const imageCache = new Map<string, { image: AircraftImage | null; expiresAt: number }>();
+
+/**
+ * Best-effort photo of this exact airframe, used when the flight's own photo is only a
+ * same-type match. Cached like the details, and any failure resolves to null.
+ */
+async function fetchRegistrationImage(apiKey: string, reg: string): Promise<AircraftImage | null> {
+  const cached = imageCache.get(reg);
+  if (cached && cached.expiresAt > Date.now()) return cached.image;
+
+  try {
+    const res = await fetch(`${API_BASE}/aircrafts/reg/${encodeURIComponent(reg)}/image/beta`, {
+      headers: { "X-RapidAPI-Key": apiKey, "X-RapidAPI-Host": API_HOST },
+    });
+    if (res.status === 204 || res.status === 404) {
+      imageCache.set(reg, { image: null, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+      return null;
+    }
+    if (!res.ok) return null;
+
+    const raw = (await res.json()) as RawImage;
+    const image = showsRegistration(raw, reg) ? toAircraftImage(raw) : null;
+    imageCache.set(reg, { image, expiresAt: Date.now() + AIRCRAFT_CACHE_TTL_MS });
+    return image;
   } catch {
     return null;
   }
