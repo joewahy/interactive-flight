@@ -96,7 +96,6 @@ function buildTooltipElement(text: string): HTMLDivElement {
 function buildAirportMarkerElement(color: string, label: string): HTMLDivElement {
   const content = document.createElement("div");
   content.style.cssText = `
-    position: relative;
     width: 12px;
     height: 12px;
     border-radius: 50%;
@@ -124,7 +123,6 @@ function buildPlaneMarkerElement(
   // the rotation applied directly, sitting next to an always-upright tooltip.
   const wrapper = document.createElement("div");
   wrapper.style.cssText = `
-    position: relative;
     width: ${size}px;
     height: ${size}px;
     cursor: pointer;
