@@ -18,6 +18,9 @@ export default function SearchBar({ onSearch, loading }: Props) {
     <form className="search-bar" onSubmit={handleSubmit}>
       <input
         type="text"
+        aria-label="Flight number"
+        autoComplete="off"
+        spellCheck={false}
         placeholder="Flight number, e.g. BA123"
         value={value}
         onChange={(e) => setValue(e.target.value.toUpperCase())}
