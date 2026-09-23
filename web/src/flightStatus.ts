@@ -121,15 +121,28 @@ export function summarizeStatus(flight: FlightResult): StatusSummary {
   const arrCode = arr.airport.iata ?? arr.airport.icao ?? "arrival";
   const depDelay = delayMinutes(dep);
   const arrDelay = delayMinutes(arr);
+  const airline = flight.airline?.name ?? null;
 
   switch (flightPhase(flight)) {
     case "canceled":
       return flight.status === "Canceled"
-        ? { tone: "bad", headline: "Canceled", detail: `The airline has canceled this ${depCode} to ${arrCode} flight.` }
-        : { tone: "warn", headline: "May be canceled", detail: "Reported as possibly canceled. Check with the airline." };
+        ? {
+            tone: "bad",
+            headline: "Canceled",
+            detail: `${airline ?? "The airline"} canceled this ${depCode} to ${arrCode} flight. Contact ${airline ?? "them"} to rebook.`,
+          }
+        : {
+            tone: "warn",
+            headline: "May be canceled",
+            detail: `Reported as possibly canceled — confirm with ${airline ?? "the airline"} before heading to the airport.`,
+          };
 
     case "diverted":
-      return { tone: "bad", headline: "Diverted", detail: `Not landing at ${arrCode} as planned.` };
+      return {
+        tone: "bad",
+        headline: "Diverted",
+        detail: `Not landing at ${arrCode} as planned. Contact ${airline ?? "the airline"} for updated arrival details.`,
+      };
 
     case "landed": {
       const arrival = movementTime(flight, "arrival");

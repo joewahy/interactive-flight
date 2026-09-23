@@ -237,8 +237,9 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--panel-bg);
-  border-left: 1px solid var(--panel-border);
-  box-shadow: -8px 0 24px -12px rgba(28, 34, 48, 0.18);
+  /* Docked flush against the viewport edge, so it reads as structure rather than a floating
+     card; the edge itself carries the current status tone instead of a generic drop shadow. */
+  border-left: 1px solid color-mix(in srgb, var(--tone) 45%, var(--panel-border));
   padding: 20px 20px 32px;
   scrollbar-width: thin;
   scrollbar-color: #cdc7ba transparent;
@@ -475,6 +476,15 @@
   align-items: flex-end;
 }
 
+/* Keeps the airport identifiable after the route header above has scrolled out of view. */
+.route-times-code {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .stat-tile {
   display: flex;
   flex-direction: column;
@@ -705,9 +715,9 @@
   height: auto;
   max-height: calc(100dvh - 150px);
   border-left: none;
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid color-mix(in srgb, var(--tone) 45%, var(--panel-border));
   border-radius: 16px 16px 0 0;
-  box-shadow: 0 -8px 24px -12px rgba(28, 34, 48, 0.25);
+  box-shadow: 0 -4px 12px -4px rgba(28, 34, 48, 0.22);
   padding: 0 16px calc(24px + env(safe-area-inset-bottom));
   transition: max-height 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -733,6 +743,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   width: calc(100% + 32px);
   height: 28px;
   margin: 0 -16px 4px;
@@ -751,8 +762,21 @@
   transition: background-color 0.15s ease;
 }
 
+.sheet-handle svg {
+  color: var(--text-dim);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s ease;
+}
+
+.sheet-handle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
 .sheet-handle:hover .sheet-grip {
   background: var(--text-dim);
+}
+
+.sheet-handle:hover svg {
+  color: var(--text);
 }
 
 @media (max-width: 520px) {
@@ -782,6 +806,10 @@
 
   .details-panel.sheet,
   .flight-map .maplibregl-ctrl-bottom-left {
+    transition: none;
+  }
+
+  .sheet-handle svg {
     transition: none;
   }
 }

@@ -11,6 +11,7 @@ import {
   movementTime,
   parseApiTime,
   summarizeStatus,
+  type StatusSummary,
 } from "../flightStatus";
 import { planeIconSvg } from "../planeIcon";
 
@@ -96,6 +97,11 @@ function airportCode(airport: Airport): string {
   return airport.iata ?? airport.icao ?? "—";
 }
 
+/** "SFO · San Francisco" — keeps the airport identifiable in sections far from the route header. */
+function airportLabel(airport: Airport): string {
+  return `${airportCode(airport)} · ${airport.municipality ?? airport.name}`;
+}
+
 function CloseIcon() {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -104,8 +110,19 @@ function CloseIcon() {
   );
 }
 
-function StatusBlock({ flight, lastUpdatedMs, autoRefresh }: Pick<Props, "flight" | "lastUpdatedMs" | "autoRefresh">) {
-  const status = summarizeStatus(flight);
+function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
+  );
+}
+
+function StatusBlock({
+  status,
+  lastUpdatedMs,
+  autoRefresh,
+}: Pick<Props, "lastUpdatedMs" | "autoRefresh"> & { status: StatusSummary }) {
   return (
     <div className={`status-block tone-${status.tone}`}>
       {/* Polite so a status change from a background refresh is announced, not the every-minute timestamp. */}
@@ -165,6 +182,9 @@ function TimeColumn({ flight, which }: { flight: FlightResult; which: "departure
 
   return (
     <div className={`route-times-col ${which === "departure" ? "start" : "end"}`} role="group" aria-label={`${verb} ${airportCode(movement.airport)}`}>
+      <span className="route-times-code" aria-hidden="true">
+        {airportCode(movement.airport)}
+      </span>
       <div className="stat-tile">
         <span className="stat-label">Scheduled</span>
         <span className="stat-value muted">{formatAirportTime(movement.scheduledUtc, timeZone)}</span>
@@ -174,9 +194,10 @@ function TimeColumn({ flight, which }: { flight: FlightResult; which: "departure
           <span className="stat-label">{current.label}</span>
           <span className="stat-value">{current.utc ? formatAirportTime(current.utc, timeZone) : "Not reported"}</span>
           {delay !== null && <span className={`stat-delta tone-${delayTone(delay)}`}>{describeDelay(delay)}</span>}
+          {meta && <span className="stat-sub">{meta}</span>}
         </div>
       )}
-      {meta && <p className="route-meta">{meta}</p>}
+      {!current && meta && <p className="route-meta">{meta}</p>}
     </div>
   );
 }
@@ -451,11 +472,12 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
   }, [variant, onPeekHeightChange]);
 
   const airlineName = flight.airline?.name;
+  const status = summarizeStatus(flight);
 
   return (
     <section
       ref={panelRef}
-      className={`details-panel ${variant}${collapsed ? " collapsed" : ""}`}
+      className={`details-panel ${variant} tone-${status.tone}${collapsed ? " collapsed" : ""}`}
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
@@ -471,6 +493,7 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
           onClick={() => setExpanded((e) => !e)}
         >
           <span className="sheet-grip" aria-hidden="true" />
+          <ChevronIcon />
         </button>
       )}
 
@@ -488,7 +511,7 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
           it, so there it opens the expanded part instead. */}
       {variant === "side" && flight.aircraft && <AircraftPhoto aircraft={flight.aircraft} />}
 
-      <StatusBlock flight={flight} lastUpdatedMs={lastUpdatedMs} autoRefresh={autoRefresh} />
+      <StatusBlock status={status} lastUpdatedMs={lastUpdatedMs} autoRefresh={autoRefresh} />
       </div>
 
       {/* Below the sheet's peek; inert while collapsed so it's out of the tab order too. */}
@@ -509,8 +532,12 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
 
         <section className="section" aria-labelledby="weather-heading">
           <h3 id="weather-heading">Weather now</h3>
-          <WeatherLine label={airportCode(flight.departure.airport)} weather={depWeather} onRetry={retryDepWeather} />
-          <WeatherLine label={airportCode(flight.arrival.airport)} weather={arrWeather} onRetry={retryArrWeather} />
+          <div role="group" aria-label={`Departure weather at ${airportCode(flight.departure.airport)}`}>
+            <WeatherLine label={airportLabel(flight.departure.airport)} weather={depWeather} onRetry={retryDepWeather} />
+          </div>
+          <div role="group" aria-label={`Arrival weather at ${airportCode(flight.arrival.airport)}`}>
+            <WeatherLine label={airportLabel(flight.arrival.airport)} weather={arrWeather} onRetry={retryArrWeather} />
+          </div>
         </section>
       </div>
     </section>
