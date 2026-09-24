@@ -214,7 +214,7 @@ export default function App() {
       </Suspense>
 
       <div className="overlay top" ref={searchCardRef}>
-        <h1>Contrail</h1>
+        <h1>Flightpath</h1>
         <SearchBar onSearch={handleSearch} loading={loading} />
         {error && (
           <p className="error-text" role="alert">
