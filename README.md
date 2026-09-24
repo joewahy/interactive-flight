@@ -1,5 +1,7 @@
 # interactive-flight
 
+![Searching for a flight, watching it live on the globe, and opening its details panel](docs/demo.gif)
+
 Enter a flight number, see it tracked live on a map: the flown portion of its
 route, current position (or a best-effort estimate when live position isn't
 reported), and a hover tooltip with the flight number. A details panel opens
@@ -29,9 +31,10 @@ While a flight is active, it refreshes every minute.
 
 ## How it works
 
-- `web/` (Vite + React + TypeScript): map rendered with `maplibre-gl` on a
-  free CARTO basemap (admin boundaries and labels come from the basemap
-  itself, not a separate data layer).
+- `web/` (Vite + React + TypeScript): `maplibre-gl` with its globe projection
+  on CARTO's free Voyager vector tiles (admin boundaries and labels come from
+  the basemap itself, not a separate data layer). The globe flattens into a
+  regular map as you zoom in.
 - `server/` (Express): proxies AeroDataBox so the API key never reaches the
   browser. Weather is fetched client-side from Open-Meteo (no key required).
 - When a flight has no live ADS-B position reported, the plane's position is
