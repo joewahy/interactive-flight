@@ -9,6 +9,19 @@ const API_KEY = process.env.AERODATABOX_RAPIDAPI_KEY;
 
 app.use(cors());
 
+function describeUpstreamError(upstreamStatus: number): { status: number; error: string } {
+  if (upstreamStatus === 400) {
+    return { status: 400, error: "The flight data service didn't recognize that flight number. Check the airline code and number." };
+  }
+  if (upstreamStatus === 401 || upstreamStatus === 403) {
+    return { status: 502, error: "The flight data service rejected the API key. Check AERODATABOX_RAPIDAPI_KEY in server/.env." };
+  }
+  if (upstreamStatus === 429) {
+    return { status: 429, error: "The flight data service's request limit was reached. Wait a minute, then try again." };
+  }
+  return { status: 502, error: "The flight data service isn't responding properly right now. Try again in a minute." };
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, hasApiKey: Boolean(API_KEY) });
 });
@@ -32,9 +45,11 @@ app.get("/api/flight/:number", async (req, res) => {
     res.json({ flights });
   } catch (err) {
     if (err instanceof AeroDataBoxError) {
-      res.status(err.status === 401 || err.status === 403 ? 502 : err.status).json({
-        error: `AeroDataBox request failed: ${err.message}`,
-      });
+      // The raw upstream body is for the server log; the app shows a plain-language
+      // message with a next step instead.
+      console.error(`AeroDataBox ${err.status}: ${err.message}`);
+      const { status, error } = describeUpstreamError(err.status);
+      res.status(status).json({ error });
       return;
     }
     console.error(err);

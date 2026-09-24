@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { Airport, FlightResult, Movement } from "../types";
 import { describeWeatherCode, fetchWeather, type WeatherSnapshot } from "../weather";
 import { getFlightProgress } from "../flightPosition";
@@ -8,6 +8,7 @@ import {
   describeDelay,
   formatAirportTime,
   formatDuration,
+  localDayOffset,
   movementTime,
   parseApiTime,
   summarizeStatus,
@@ -184,9 +185,28 @@ function RouteHeader({ flight }: { flight: FlightResult }) {
   );
 }
 
+/**
+ * A time with the boarding-pass day marker: "+1" when it falls on a later local date
+ * than the scheduled departure, so an overnight arrival doesn't read as the same day.
+ */
+function TimeWithDay({ flight, movement, utc }: { flight: FlightResult; movement: Movement; utc: string | null }) {
+  const dep = flight.departure;
+  const offset = localDayOffset(utc, movement.airport.timeZone, dep.scheduledUtc, dep.airport.timeZone);
+  return (
+    <>
+      {formatAirportTime(utc, movement.airport.timeZone)}
+      {offset !== null && offset !== 0 && (
+        <span className="day-offset">
+          {offset > 0 ? `+${offset}` : `−${-offset}`}
+          <span className="sr-only">{` day${Math.abs(offset) === 1 ? "" : "s"}`}</span>
+        </span>
+      )}
+    </>
+  );
+}
+
 function TimeColumn({ flight, which }: { flight: FlightResult; which: "departure" | "arrival" }) {
   const movement = flight[which];
-  const { timeZone } = movement.airport;
   const current = movementTime(flight, which);
   const delay = delayMinutes(movement);
   const meta = movementMeta(movement);
@@ -199,12 +219,16 @@ function TimeColumn({ flight, which }: { flight: FlightResult; which: "departure
       </span>
       <div className="stat-tile">
         <span className="stat-label">Scheduled</span>
-        <span className="stat-value muted">{formatAirportTime(movement.scheduledUtc, timeZone)}</span>
+        <span className="stat-value muted">
+          <TimeWithDay flight={flight} movement={movement} utc={movement.scheduledUtc} />
+        </span>
       </div>
       {current && (
         <div className="stat-tile">
           <span className="stat-label">{current.label}</span>
-          <span className="stat-value">{current.utc ? formatAirportTime(current.utc, timeZone) : "Not reported"}</span>
+          <span className="stat-value">
+            {current.utc ? <TimeWithDay flight={flight} movement={movement} utc={current.utc} /> : "Not reported"}
+          </span>
           {delay !== null && <span className={`stat-delta tone-${delayTone(delay)}`}>{describeDelay(delay)}</span>}
           {meta && <span className="stat-sub">{meta}</span>}
         </div>
@@ -439,6 +463,7 @@ function WeatherLine({ label, weather, onRetry }: { label: string; weather: Weat
 export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, variant, onPeekHeightChange, onClose }: Props) {
   const titleId = useId();
   const panelRef = useRef<HTMLElement | null>(null);
+  const headerRef = useRef<HTMLDivElement | null>(null);
   const peekRef = useRef<HTMLDivElement | null>(null);
   const [peekHeight, setPeekHeight] = useState<number | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
@@ -494,7 +519,12 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
       const active = document.activeElement;
       const focusWasInPanel = !active || active === document.body || panelRef.current?.contains(active);
       if (!focusWasInPanel) return;
-      const target = opener?.isConnected && opener !== document.body ? opener : document.querySelector<HTMLElement>(".search-bar input");
+      let target = opener?.isConnected && opener !== document.body ? opener : document.querySelector<HTMLElement>(".search-bar input");
+      // On a touch screen, focusing the search field would pop up the keyboard just for
+      // closing the panel; the button that reopens it is the better landing spot there.
+      if (target instanceof HTMLInputElement && window.matchMedia("(pointer: coarse)").matches) {
+        target = document.querySelector<HTMLElement>(".hint-pill");
+      }
       target?.focus({ preventScroll: true });
     };
   }, []);
@@ -512,16 +542,19 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
     if (collapsed && panelRef.current) panelRef.current.scrollTop = 0;
   }, [collapsed]);
 
-  // The collapsed sheet shows exactly the handle, title and status block. Their height
-  // varies (wrapping detail, the refresh line), so it's measured rather than fixed.
+  // The collapsed sheet shows exactly the header and status block. Their height varies
+  // (wrapping detail, the refresh line), so it's measured rather than fixed: the peek ends
+  // where the status block does, measured from the top of the sheet.
   useEffect(() => {
+    const header = headerRef.current;
     const peek = peekRef.current;
-    if (variant !== "sheet" || !peek) return;
+    if (variant !== "sheet" || !header || !peek) return;
     const observer = new ResizeObserver(() => {
-      const height = Math.ceil(peek.getBoundingClientRect().height);
+      const height = Math.ceil(peek.offsetTop + peek.getBoundingClientRect().height);
       setPeekHeight(height);
       onPeekHeightChange?.(height);
     });
+    observer.observe(header);
     observer.observe(peek);
     return () => observer.disconnect();
   }, [variant, onPeekHeightChange]);
@@ -536,40 +569,44 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
-      style={collapsed && peekHeight !== null ? { maxHeight: peekHeight } : undefined}
+      style={variant === "sheet" && peekHeight !== null ? ({ "--peek": `${peekHeight}px` } as CSSProperties) : undefined}
     >
-      <div ref={peekRef} className="details-peek">
-      {variant === "sheet" && (
-        <button
-          type="button"
-          className="sheet-handle"
-          aria-expanded={expanded}
-          aria-label={expanded ? "Show less" : "Show all flight details"}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onClick={handleClick}
-        >
-          <span className="sheet-grip" aria-hidden="true" />
-          <ChevronIcon />
-        </button>
-      )}
+      {/* Pinned to the top of the expanded sheet while its content scrolls, so the handle
+          and close button stay in reach. */}
+      <div ref={headerRef} className="details-header">
+        {variant === "sheet" && (
+          <button
+            type="button"
+            className="sheet-handle"
+            aria-expanded={expanded}
+            aria-label={expanded ? "Show less" : "Show all flight details"}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onClick={handleClick}
+          >
+            <span className="sheet-grip" aria-hidden="true" />
+            <ChevronIcon />
+          </button>
+        )}
 
-      <div className="details-top">
-        <h2 id={titleId} ref={titleRef} tabIndex={-1}>
-          {flight.number}
-          {airlineName && <span className="details-airline">{airlineName}</span>}
-        </h2>
-        <button type="button" className="close-btn" onClick={onClose} aria-label="Close flight details">
-          <CloseIcon />
-        </button>
+        <div className="details-top">
+          <h2 id={titleId} ref={titleRef} tabIndex={-1}>
+            {flight.number}
+            {airlineName && <span className="details-airline">{airlineName}</span>}
+          </h2>
+          <button type="button" className="close-btn" onClick={onClose} aria-label="Close flight details">
+            <CloseIcon />
+          </button>
+        </div>
       </div>
 
-      {/* Sits under the title in the side panel. The phone sheet's peek has no room for
-          it, so there it opens the expanded part instead. */}
-      {variant === "side" && flight.aircraft && <AircraftPhoto aircraft={flight.aircraft} />}
+      <div ref={peekRef} className="details-peek">
+        {/* Sits under the title in the side panel. The phone sheet's peek has no room for
+            it, so there it opens the expanded part instead. */}
+        {variant === "side" && flight.aircraft && <AircraftPhoto aircraft={flight.aircraft} />}
 
-      <StatusBlock status={status} lastUpdatedMs={lastUpdatedMs} autoRefresh={autoRefresh} />
+        <StatusBlock status={status} lastUpdatedMs={lastUpdatedMs} autoRefresh={autoRefresh} />
       </div>
 
       {/* Below the sheet's peek; inert while collapsed so it's out of the tab order too. */}

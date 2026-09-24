@@ -310,7 +310,7 @@ export async function fetchFlightsByNumber(
     },
   });
 
-  if (res.status === 204) {
+  if (res.status === 204 || res.status === 404) {
     return [];
   }
   if (!res.ok) {

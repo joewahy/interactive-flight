@@ -1,9 +1,14 @@
 import type { FlightResult, Movement } from "./types";
 
-/** AeroDataBox times look like "2026-09-23 19:23Z"; normalized so every browser parses them. */
+/**
+ * AeroDataBox times look like "2026-09-23 19:23Z"; normalized so every browser parses them.
+ * Every field passed here is UTC, but location.reportedAtUtc arrives without the "Z", which
+ * Date.parse would otherwise read as the viewer's local time.
+ */
 export function parseApiTime(value: string | null): number | null {
   if (!value) return null;
-  const t = Date.parse(value.replace(" ", "T"));
+  const iso = value.trim().replace(" ", "T");
+  const t = Date.parse(/(Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : `${iso}Z`);
   return Number.isNaN(t) ? null : t;
 }
 
@@ -19,6 +24,42 @@ export function formatAirportTime(utc: string | null, timeZone: string | null): 
     });
   } catch {
     return new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+}
+
+/** An instant's calendar date in the airport's zone, as "YYYY-MM-DD" (en-CA's format), for comparing days. */
+function localDateKey(ms: number, timeZone: string | null): string {
+  const options: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit" };
+  try {
+    return new Intl.DateTimeFormat("en-CA", { ...options, ...(timeZone ? { timeZone } : {}) }).format(ms);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", options).format(ms);
+  }
+}
+
+/**
+ * Calendar days from one airport-local date to another, each read in its own zone: 1 for
+ * an arrival the day after departure (the "+1" on a boarding pass). Null if either is unknown.
+ */
+export function localDayOffset(utc: string | null, timeZone: string | null, fromUtc: string | null, fromTimeZone: string | null): number | null {
+  const t = parseApiTime(utc);
+  const from = parseApiTime(fromUtc);
+  if (t === null || from === null) return null;
+  const days = (Date.parse(localDateKey(t, timeZone)) - Date.parse(localDateKey(from, fromTimeZone))) / 86_400_000;
+  return Number.isFinite(days) ? Math.round(days) : null;
+}
+
+/** Like formatAirportTime, but led by the weekday when it isn't today at that airport: "Thu 8:15 PM". */
+export function formatAirportWhen(utc: string | null, timeZone: string | null): string {
+  const t = parseApiTime(utc);
+  if (t === null) return "—";
+  const time = formatAirportTime(utc, timeZone);
+  if (localDateKey(t, timeZone) === localDateKey(Date.now(), timeZone)) return time;
+  try {
+    const weekday = new Date(t).toLocaleDateString(undefined, { weekday: "short", ...(timeZone ? { timeZone } : {}) });
+    return `${weekday} ${time}`;
+  } catch {
+    return time;
   }
 }
 
@@ -47,10 +88,28 @@ export function flightPhase(flight: FlightResult): FlightPhase {
   return "unknown";
 }
 
-/** Minutes between the scheduled and revised time; positive is late. Null without a revised time. */
+// Takeoff follows the gate departure (and touchdown precedes the gate arrival) by minutes,
+// not hours. A runway time this far past the revised gate time means the revised time was
+// never updated from the schedule, as AeroDataBox sometimes does on a badly late flight.
+const STALE_REVISED_MS = 60 * 60_000;
+
+/** The revised gate time, or the runway time when it shows the revised time is stale. */
+function bestKnownUtc(movement: Movement): string | null {
+  const revised = parseApiTime(movement.revisedUtc);
+  const runway = parseApiTime(movement.runwayUtc);
+  if (revised !== null && runway !== null && runway - revised > STALE_REVISED_MS) return movement.runwayUtc;
+  return movement.revisedUtc;
+}
+
+/** The best current estimate for a movement, falling back to the schedule. */
+export function latestEstimateUtc(movement: Movement): string | null {
+  return bestKnownUtc(movement) ?? movement.scheduledUtc;
+}
+
+/** Minutes between the scheduled and best-known time; positive is late. Null without a revised time. */
 export function delayMinutes(movement: Movement): number | null {
   const scheduled = parseApiTime(movement.scheduledUtc);
-  const revised = parseApiTime(movement.revisedUtc);
+  const revised = parseApiTime(bestKnownUtc(movement));
   if (scheduled === null || revised === null) return null;
   return Math.round((revised - scheduled) / 60_000);
 }
@@ -90,8 +149,8 @@ export function movementTime(flight: FlightResult, which: "departure" | "arrival
   if (phase === "canceled" || (phase === "diverted" && which === "arrival")) return null;
   const movement = flight[which];
   const happened = which === "departure" ? DEPARTED_STATUSES.has(flight.status) : flight.status === "Arrived";
-  if (happened) return { label: "Actual", utc: movement.revisedUtc ?? movement.runwayUtc };
-  return { label: "Expected", utc: movement.revisedUtc ?? movement.scheduledUtc };
+  if (happened) return { label: "Actual", utc: bestKnownUtc(movement) ?? movement.runwayUtc };
+  return { label: "Expected", utc: latestEstimateUtc(movement) };
 }
 
 export interface StatusSummary {
@@ -146,7 +205,7 @@ export function summarizeStatus(flight: FlightResult): StatusSummary {
         : {
             tone: "warn",
             headline: "May be canceled",
-            detail: `Reported as possibly canceled — confirm with ${airline ?? "the airline"} before heading to the airport.`,
+            detail: `Reported as possibly canceled. Confirm with ${airline ?? "the airline"} before heading to the airport.`,
             action: contactAirlineAction(airline),
           };
 
@@ -172,30 +231,40 @@ export function summarizeStatus(flight: FlightResult): StatusSummary {
     }
 
     case "airborne": {
-      const headline = flight.status === "Approaching" ? `Approaching ${arrCode}` : "In the air";
+      const where = flight.status === "Approaching" ? `Approaching ${arrCode}` : "In the air";
       const expected = movementTime(flight, "arrival");
-      const lands = expected?.utc && `Lands ${formatAirportTime(expected.utc, arr.airport.timeZone)} at ${arrCode}`;
+      const landsAt = expected?.utc ? `${formatAirportWhen(expected.utc, arr.airport.timeZone)} at ${arrCode}` : null;
+      // Late is the news, so it's the headline in words rather than only the amber tone;
+      // where the plane is moves down to the detail.
+      if (arrDelay !== null && arrDelay >= LATE_THRESHOLD_MIN) {
+        return {
+          tone: "warn",
+          headline: `Arriving ${formatDuration(arrDelay * 60_000)} late`,
+          detail: joinParts(where, landsAt && `lands ${landsAt}`),
+        };
+      }
       return {
-        tone: arrDelay !== null && arrDelay >= LATE_THRESHOLD_MIN ? "warn" : "active",
-        headline,
-        detail: lands ? joinParts(lands, arrDelay !== null && describeDelay(arrDelay)) : null,
+        tone: "active",
+        headline: where,
+        detail: landsAt ? joinParts(`Lands ${landsAt}`, arrDelay !== null && describeDelay(arrDelay)) : null,
       };
     }
 
     case "pre-departure": {
       const expected = movementTime(flight, "departure");
-      const late = flight.status === "Delayed" || (depDelay !== null && depDelay >= LATE_THRESHOLD_MIN);
+      const lateBy = depDelay !== null && depDelay >= LATE_THRESHOLD_MIN ? depDelay : null;
+      const late = flight.status === "Delayed" || lateBy !== null;
       const headline =
-        flight.status === "Expected" && depDelay !== null && depDelay >= LATE_THRESHOLD_MIN
-          ? `Delayed ${formatDuration(depDelay * 60_000)}`
+        (flight.status === "Expected" || flight.status === "Delayed") && lateBy !== null
+          ? `Delayed ${formatDuration(lateBy * 60_000)}`
           : PRE_DEPARTURE_HEADLINES[flight.status] ?? "Scheduled";
       return {
         tone: late ? "warn" : "neutral",
         headline,
         detail: joinParts(
-          expected?.utc && `Departs ${formatAirportTime(expected.utc, dep.airport.timeZone)} from ${depCode}`,
+          expected?.utc && `Departs ${formatAirportWhen(expected.utc, dep.airport.timeZone)} from ${depCode}`,
           dep.gate && `Gate ${dep.gate}`,
-          flight.status !== "Delayed" && depDelay !== null && depDelay !== 0 && describeDelay(depDelay)
+          !headline.startsWith("Delayed ") && depDelay !== null && depDelay !== 0 && describeDelay(depDelay)
         ),
       };
     }
