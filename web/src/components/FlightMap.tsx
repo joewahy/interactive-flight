@@ -225,7 +225,7 @@ function buildPlaneMarkerElement(
   icon.innerHTML = planeIconSvg(isLive ? ACCENT : ESTIMATE);
   wrapper.appendChild(icon);
 
-  attachTooltip(wrapper, `${flightNumber} · ${isLive ? "live position" : "estimated position"}`);
+  attachTooltip(wrapper, `${flightNumber}`);
   wrapper.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
@@ -238,6 +238,15 @@ type Insets = { top: number; right: number; bottom: number };
 // How long after a framing starts that a change in the overlays' size re-aims it.
 const REFRAME_WINDOW_MS = 1000;
 
+// The globe projection reprojects vector tiles onto a sphere every frame during a camera
+// move, which costs more than the flat map's did; a shorter flight leaves less time for a
+// slower device to visibly fall behind it.
+const ROUTE_FIT_DURATION_MS = 700;
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 function fitRoute(map: MaplibreMap, bounds: LngLatBounds, insets: Insets) {
   map.fitBounds(bounds, {
     padding: {
@@ -247,7 +256,7 @@ function fitRoute(map: MaplibreMap, bounds: LngLatBounds, insets: Insets) {
       right: 80 + insets.right,
     },
     maxZoom: 6,
-    duration: 1200,
+    duration: prefersReducedMotion() ? 0 : ROUTE_FIT_DURATION_MS,
   });
 }
 
@@ -308,7 +317,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
       if (!pos) return;
       // An offset rather than `padding`, which MapLibre would keep applying to every later camera move.
       const { top, right, bottom } = insetsRef.current;
-      map.easeTo({ center: [pos.lon, pos.lat], offset: [-right / 2, (top - bottom) / 2], duration: 600 });
+      map.easeTo({ center: [pos.lon, pos.lat], offset: [-right / 2, (top - bottom) / 2], duration: prefersReducedMotion() ? 0 : 600 });
     });
     map.addControl(centerControl, "top-right");
     centerControlRef.current = centerControl;
