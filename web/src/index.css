@@ -23,6 +23,8 @@
   --bad-bg: #fbe8e6;
   --track: #e1ddd3;
   --shadow: 0 1px 2px rgba(28, 34, 48, 0.08), 0 8px 24px -8px rgba(28, 34, 48, 0.18);
+  /* Space beyond the globe's edge is transparent canvas, so this paints through it. */
+  --void-bg: #070b18;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   /* B612 was drawn for Airbus cockpit displays: the name, headings and instrument labels
      use it, and its mono cut sets codes, times and readings like a departures board.
@@ -49,6 +51,16 @@ body,
 
 body {
   overflow: hidden;
+  /* A tiled SVG dot pattern standing in for stars behind the globe (the map canvas is
+     transparent past the sphere's edge, so this shows through there). Plain CSS
+     radial-gradients at this size render inconsistently (near-invisible on some
+     GPUs), so the dots are drawn as real SVG circles instead. */
+  background-color: var(--void-bg);
+  background-image: url("./assets/stars.svg");
+  background-repeat: repeat;
+  background-size: 280px 280px;
+  /* Set from FlightMap.tsx as the globe is dragged, so the stars drift with it. */
+  background-position: var(--star-offset-x, 0px) var(--star-offset-y, 0px);
 }
 
 ::selection {

@@ -113,6 +113,19 @@ function globeOverviewZoom(container: HTMLElement): number {
   return Math.log2((0.425 * side * 2 * Math.PI) / 512);
 }
 
+// Inverse of the radius formula above: how many screen px the globe's radius spans at a zoom.
+function globeRadiusPx(zoom: number): number {
+  return (512 * Math.pow(2, zoom)) / (2 * Math.PI);
+}
+
+// A single drag/zoom step's worth of star drift is capped at this many px. The radius-based
+// conversion below only holds while the whole sphere is in view; past that, MapLibre flattens
+// into a regular map, where the same lng/lat change no longer implies that many screen px.
+const STAR_DRIFT_STEP_MAX = 40;
+// Matches the tile size in index.css's starfield background, so the offset can wrap instead
+// of growing without bound over a long session of dragging.
+const STAR_TILE_PX = 280;
+
 /**
  * The heading as drawn on screen, from projecting a point just ahead of the plane. On a
  * globe, north only points straight up at the center of the view, so the compass heading
@@ -293,6 +306,10 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
   // re-aiming the icon as the globe turns.
   const planeRef = useRef<{ lon: number; lat: number; headingDeg: number } | null>(null);
   const centerControlRef = useRef<CenterOnPlaneControl | null>(null);
+  // Drives the starfield's CSS background-position (see index.css) so it drifts with the
+  // globe's rotation instead of sitting static behind it.
+  const starCenterRef = useRef<{ lng: number; lat: number } | null>(null);
+  const starOffsetRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -329,6 +346,25 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
       const plane = planeRef.current;
       const icon = planeMarkerRef.current?.getElement().firstElementChild as HTMLElement | null | undefined;
       if (plane && icon) icon.style.transform = `rotate(${screenHeading(map, plane, plane.headingDeg)}deg)`;
+    });
+    map.on("move", () => {
+      const center = map.getCenter();
+      const prev = starCenterRef.current;
+      starCenterRef.current = { lng: center.lng, lat: center.lat };
+      if (!prev) return;
+
+      let dLng = center.lng - prev.lng;
+      while (dLng > 180) dLng -= 360;
+      while (dLng < -180) dLng += 360;
+      const dLat = center.lat - prev.lat;
+
+      const degToPx = globeRadiusPx(map.getZoom()) * (Math.PI / 180);
+      const clamp = (v: number) => Math.max(-STAR_DRIFT_STEP_MAX, Math.min(STAR_DRIFT_STEP_MAX, v));
+      const offset = starOffsetRef.current;
+      offset.x = (offset.x - clamp(dLng * degToPx)) % STAR_TILE_PX;
+      offset.y = (offset.y + clamp(dLat * degToPx)) % STAR_TILE_PX;
+      document.documentElement.style.setProperty("--star-offset-x", `${offset.x}px`);
+      document.documentElement.style.setProperty("--star-offset-y", `${offset.y}px`);
     });
 
     map.on("load", () => {

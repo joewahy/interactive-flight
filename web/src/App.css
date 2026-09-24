@@ -12,7 +12,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-dim);
+  /* Sits directly on the starry void (body background), not a panel, so it needs its
+     own light-on-dark color rather than --text-dim. */
+  color: rgba(255, 255, 255, 0.7);
   font-size: 14px;
 }
 
