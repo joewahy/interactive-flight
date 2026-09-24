@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import SearchBar from "./components/SearchBar";
 import DetailsPanel from "./components/DetailsPanel";
 import { fetchFlightByNumber, ApiError } from "./api";
@@ -64,6 +64,16 @@ function legLabel(flight: FlightResult): string {
   return [route, day, phase].filter(Boolean).join(" · ");
 }
 
+const VOID_THEME_STORAGE_KEY = "flightpath-void-theme";
+
+function loadVoidTheme(): "light" | "dark" {
+  try {
+    return localStorage.getItem(VOID_THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
@@ -102,6 +112,19 @@ export default function App() {
   // (results can share a flight number and lack a UTC time, which would otherwise look identical).
   const [pickCount, setPickCount] = useState(0);
   const closeDetails = useCallback(() => setShowDetails(false), []);
+  const [voidTheme, setVoidTheme] = useState<"light" | "dark">(loadVoidTheme);
+  const toggleVoidTheme = useCallback(() => setVoidTheme((mode) => (mode === "light" ? "dark" : "light")), []);
+
+  // Layout, not passive, so a saved "dark" preference applies before the first paint
+  // instead of flashing the light default.
+  useLayoutEffect(() => {
+    document.body.dataset.voidTheme = voidTheme;
+    try {
+      localStorage.setItem(VOID_THEME_STORAGE_KEY, voidTheme);
+    } catch {
+      // Private browsing or storage disabled: the toggle still works, just not remembered.
+    }
+  }, [voidTheme]);
 
   const selectedFlight = flights[selectedIndex] ?? null;
   const autoRefresh = selectedFlight !== null && shouldAutoRefresh(selectedFlight, clockMs);
@@ -210,6 +233,8 @@ export default function App() {
           insets={mapInsets}
           framingKey={`${resultGeneration}-${pickCount}`}
           onMarkerClick={() => setShowDetails(true)}
+          voidTheme={voidTheme}
+          onToggleVoidTheme={toggleVoidTheme}
         />
       </Suspense>
 

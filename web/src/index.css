@@ -51,16 +51,41 @@ body,
 
 body {
   overflow: hidden;
-  /* A tiled SVG dot pattern standing in for stars behind the globe (the map canvas is
-     transparent past the sphere's edge, so this shows through there). Plain CSS
-     radial-gradients at this size render inconsistently (near-invisible on some
-     GPUs), so the dots are drawn as real SVG circles instead. */
+  /* The plain, cream void: matches the basemap's own land color, so the globe reads as
+     sitting on the same "paper" as the rest of the app. Always the base layer, even in
+     dark mode, where the starfield below just fades in over it. */
+  background: var(--bg);
+}
+
+/* The dark starfield lives on its own layer, faded in/out by opacity, rather than being
+   swapped directly on body's own background — background-image can't be transitioned, so
+   toggling it there would snap instead of crossfading. A tiled SVG dot pattern stands in for
+   stars (the map canvas is transparent past the sphere's edge, so this shows through there);
+   plain CSS radial-gradients at this size render inconsistently (near-invisible on some
+   GPUs), so the dots are drawn as real SVG circles instead. App.tsx sets data-void-theme
+   from the bottom-left toggle it owns (and persists to localStorage). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
   background-color: var(--void-bg);
   background-image: url("./assets/stars.svg");
   background-repeat: repeat;
   background-size: 280px 280px;
   /* Set from FlightMap.tsx as the globe is dragged, so the stars drift with it. */
   background-position: var(--star-offset-x, 0px) var(--star-offset-y, 0px);
+  opacity: 0;
+}
+
+body[data-void-theme="dark"]::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body::before {
+    transition: opacity 0.4s ease;
+  }
 }
 
 ::selection {

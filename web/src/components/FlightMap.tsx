@@ -87,6 +87,50 @@ class CenterOnPlaneControl implements IControl {
   }
 }
 
+const MOON_ICON =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" /></svg>';
+const SUN_ICON =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></svg>';
+
+/** Bottom-left button toggling the void's background between the starry dark mode and the
+ * plain light mode; its icon shows the mode a click would switch *to*. */
+class VoidThemeControl implements IControl {
+  private container: HTMLDivElement | null = null;
+  private button: HTMLButtonElement | null = null;
+  private readonly onClick: () => void;
+
+  constructor(onClick: () => void) {
+    this.onClick = onClick;
+  }
+
+  onAdd(): HTMLElement {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "void-theme-toggle";
+    button.addEventListener("click", this.onClick);
+    container.appendChild(button);
+    this.container = container;
+    this.button = button;
+    return container;
+  }
+
+  onRemove(): void {
+    this.container?.remove();
+    this.container = null;
+    this.button = null;
+  }
+
+  setMode(mode: "light" | "dark") {
+    if (!this.button) return;
+    const label = mode === "light" ? "Switch to starry background" : "Switch to light background";
+    this.button.title = label;
+    this.button.setAttribute("aria-label", label);
+    this.button.innerHTML = mode === "light" ? MOON_ICON : SUN_ICON;
+  }
+}
+
 /** "flown" is departure to the plane; "ahead" is the plane (or, with no plane, departure) to arrival. */
 type RoutePart = "flown" | "ahead";
 
@@ -282,9 +326,12 @@ interface Props {
   /** Changes on each new search or pick; the route is framed once per key rather than per refresh. */
   framingKey: string;
   onMarkerClick: () => void;
+  /** Which background shows behind the globe; App.tsx owns and persists the choice. */
+  voidTheme: "light" | "dark";
+  onToggleVoidTheme: () => void;
 }
 
-export default function FlightMap({ flight, clockMs, insets, framingKey, onMarkerClick }: Props) {
+export default function FlightMap({ flight, clockMs, insets, framingKey, onMarkerClick, voidTheme, onToggleVoidTheme }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const loadedRef = useRef(false);
@@ -306,6 +353,9 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
   // re-aiming the icon as the globe turns.
   const planeRef = useRef<{ lon: number; lat: number; headingDeg: number } | null>(null);
   const centerControlRef = useRef<CenterOnPlaneControl | null>(null);
+  const voidThemeControlRef = useRef<VoidThemeControl | null>(null);
+  const onToggleVoidThemeRef = useRef(onToggleVoidTheme);
+  onToggleVoidThemeRef.current = onToggleVoidTheme;
   // Drives the starfield's CSS background-position (see index.css) so it drifts with the
   // globe's rotation instead of sitting static behind it.
   const starCenterRef = useRef<{ lng: number; lat: number } | null>(null);
@@ -338,6 +388,9 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     });
     map.addControl(centerControl, "top-right");
     centerControlRef.current = centerControl;
+    const voidThemeControl = new VoidThemeControl(() => onToggleVoidThemeRef.current());
+    map.addControl(voidThemeControl, "bottom-left");
+    voidThemeControlRef.current = voidThemeControl;
     mapRef.current = map;
 
     // Continuous, not zoomend-only, so the icon grows smoothly as the gesture happens.
@@ -400,9 +453,16 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
       map.remove();
       mapRef.current = null;
       centerControlRef.current = null;
+      voidThemeControlRef.current = null;
       loadedRef.current = false;
     };
   }, []);
+
+  // Keeps the control's icon in sync with the theme App.tsx owns (also runs once on mount,
+  // after the effect above has created the control).
+  useEffect(() => {
+    voidThemeControlRef.current?.setMode(voidTheme);
+  }, [voidTheme]);
 
   useEffect(() => {
     const map = mapRef.current;

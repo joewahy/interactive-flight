@@ -12,10 +12,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Sits directly on the starry void (body background), not a panel, so it needs its
-     own light-on-dark color rather than --text-dim. */
-  color: rgba(255, 255, 255, 0.7);
+  /* Sits directly on the void (body background), not a panel, so its color follows
+     the void's own theme rather than --text-dim. */
+  color: var(--text-dim);
   font-size: 14px;
+}
+
+body[data-void-theme="dark"] .map-loading {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .flight-map {
@@ -42,6 +46,17 @@
 }
 
 .flight-map .center-on-plane:hover {
+  color: var(--accent-strong);
+}
+
+.flight-map .void-theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+
+.flight-map .void-theme-toggle:hover {
   color: var(--accent-strong);
 }
 
