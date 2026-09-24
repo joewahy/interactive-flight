@@ -98,6 +98,17 @@ export interface StatusSummary {
   tone: Tone;
   headline: string;
   detail: string | null;
+  /** A concrete next step, when there is a real one — e.g. reaching the airline about a cancellation. */
+  action?: { label: string; href: string } | null;
+}
+
+/** A search for the airline's own contact info — not a fabricated number, but a real, honest next step. */
+function contactAirlineAction(airline: string | null): { label: string; href: string } | null {
+  if (!airline) return null;
+  return {
+    label: `Contact ${airline}`,
+    href: `https://www.google.com/search?q=${encodeURIComponent(`${airline} customer service`)}`,
+  };
 }
 
 const PRE_DEPARTURE_HEADLINES: Record<string, string> = {
@@ -130,11 +141,13 @@ export function summarizeStatus(flight: FlightResult): StatusSummary {
             tone: "bad",
             headline: "Canceled",
             detail: `${airline ?? "The airline"} canceled this ${depCode} to ${arrCode} flight. Contact ${airline ?? "them"} to rebook.`,
+            action: contactAirlineAction(airline),
           }
         : {
             tone: "warn",
             headline: "May be canceled",
             detail: `Reported as possibly canceled — confirm with ${airline ?? "the airline"} before heading to the airport.`,
+            action: contactAirlineAction(airline),
           };
 
     case "diverted":
@@ -142,6 +155,7 @@ export function summarizeStatus(flight: FlightResult): StatusSummary {
         tone: "bad",
         headline: "Diverted",
         detail: `Not landing at ${arrCode} as planned. Contact ${airline ?? "the airline"} for updated arrival details.`,
+        action: contactAirlineAction(airline),
       };
 
     case "landed": {

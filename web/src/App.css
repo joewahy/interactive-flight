@@ -339,11 +339,12 @@
   color: var(--text);
 }
 
+/* The largest text in the panel: this is the one-glance answer everything else supports. */
 .status-headline {
   margin: 0;
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.2;
   color: var(--tone);
 }
 
@@ -353,6 +354,10 @@
   line-height: 1.4;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+
+.status-action {
+  margin: 8px 0 0;
 }
 
 .status-updated {
@@ -383,7 +388,7 @@
 }
 
 .route-code {
-  font-size: 30px;
+  font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -722,9 +727,11 @@
   transition: max-height 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* max-height itself is set inline from the measured peek (DetailsPanel). */
+/* A close approximation of the peek's real height, so the sheet doesn't flash full content
+   before DetailsPanel's ResizeObserver measures it and sets the exact value inline. */
 .details-panel.sheet.collapsed {
   overflow: hidden;
+  max-height: 220px;
 }
 
 .details-panel.sheet .status-block {
@@ -752,6 +759,7 @@
   border-radius: 16px 16px 0 0;
   background: none;
   cursor: pointer;
+  touch-action: none;
 }
 
 .sheet-grip {

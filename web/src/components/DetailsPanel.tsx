@@ -71,6 +71,11 @@ function formatCalendarDate(ymd: string | null): string | null {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+// Below these, a pointer's up/down movement on the sheet handle is read as a tap, not a swipe.
+const SHEET_DRAG_MOVE_PX = 6;
+const SHEET_DRAG_DISTANCE_PX = 24;
+const SHEET_DRAG_VELOCITY = 0.3; // px/ms
+
 const COMPASS_POINTS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
 function compassPoint(deg: number): string {
@@ -129,6 +134,13 @@ function StatusBlock({
       <div aria-live="polite" aria-atomic="true">
         <p className="status-headline">{status.headline}</p>
         {status.detail && <p className="status-detail">{status.detail}</p>}
+        {status.action && (
+          <p className="status-action">
+            <a className="text-button" href={status.action.href} target="_blank" rel="noopener noreferrer">
+              {status.action.label}
+            </a>
+          </p>
+        )}
       </div>
       {autoRefresh && lastUpdatedMs !== null && (
         <p className="status-updated">Updates every minute · last {formatAgo(Date.now() - lastUpdatedMs)}</p>
@@ -379,6 +391,12 @@ type WeatherState = WeatherSnapshot | null | undefined;
 function useAirportWeather(lat: number | null, lon: number | null): [WeatherState, () => void] {
   const [weather, setWeather] = useState<WeatherState>(undefined);
   const [attempt, setAttempt] = useState(0);
+  // Retry flips straight to "loading" on click, rather than waiting a render for the effect
+  // below to do it, so mashing "Try again" gets an immediate response instead of nothing.
+  const retry = useCallback(() => {
+    setWeather(undefined);
+    setAttempt((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (lat === null || lon === null) {
@@ -395,7 +413,7 @@ function useAirportWeather(lat: number | null, lon: number | null): [WeatherStat
     };
   }, [lat, lon, attempt]);
 
-  return [weather, useCallback(() => setAttempt((n) => n + 1), [])];
+  return [weather, retry];
 }
 
 function WeatherLine({ label, weather, onRetry }: { label: string; weather: WeatherState; onRetry: () => void }) {
@@ -426,6 +444,43 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const [expanded, setExpanded] = useState(false);
   const collapsed = variant === "sheet" && !expanded;
+
+  // A swipe on the handle expands/collapses like a native sheet; a plain tap (mouse, touch,
+  // or keyboard) still falls through to onClick below. dragged tracks which one happened so
+  // the click that follows a swipe's pointerup doesn't also toggle the state a second time.
+  const dragStart = useRef<{ y: number; t: number } | null>(null);
+  const dragged = useRef(false);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    dragStart.current = { y: event.clientY, t: Date.now() };
+    dragged.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (dragStart.current && Math.abs(event.clientY - dragStart.current.y) > SHEET_DRAG_MOVE_PX) {
+      dragged.current = true;
+    }
+  }, []);
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const start = dragStart.current;
+    dragStart.current = null;
+    if (!start || !dragged.current) return;
+    const deltaY = event.clientY - start.y;
+    const velocity = deltaY / Math.max(1, Date.now() - start.t);
+    if (Math.abs(deltaY) > SHEET_DRAG_DISTANCE_PX || Math.abs(velocity) > SHEET_DRAG_VELOCITY) {
+      setExpanded(deltaY < 0);
+    }
+  }, []);
+
+  const handleClick = useCallback(() => {
+    if (dragged.current) {
+      dragged.current = false;
+      return;
+    }
+    setExpanded((e) => !e);
+  }, []);
 
   const [depWeather, retryDepWeather] = useAirportWeather(flight.departure.airport.lat, flight.departure.airport.lon);
   const [arrWeather, retryArrWeather] = useAirportWeather(flight.arrival.airport.lat, flight.arrival.airport.lon);
@@ -490,7 +545,10 @@ export default function DetailsPanel({ flight, lastUpdatedMs, autoRefresh, varia
           className="sheet-handle"
           aria-expanded={expanded}
           aria-label={expanded ? "Show less" : "Show all flight details"}
-          onClick={() => setExpanded((e) => !e)}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onClick={handleClick}
         >
           <span className="sheet-grip" aria-hidden="true" />
           <ChevronIcon />
