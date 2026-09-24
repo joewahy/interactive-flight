@@ -1,4 +1,4 @@
-# interactive-flight
+# Flightpath
 
 ![Searching for a flight, watching it live on the globe, and opening its details panel](docs/demo.gif)
 
@@ -12,6 +12,10 @@ times in each airport's own time zone, route progress, live altitude, speed,
 heading and climb/descent rate, the aircraft (age, seats, engines, first
 flight, and a photo when one is available), and departure/arrival weather.
 While a flight is active, it refreshes every minute.
+
+A control at the bottom-left of the globe switches the space behind it
+between a plain cream void and a dark starfield that drifts as you drag the
+globe; the choice is remembered locally.
 
 ## Setup
 
@@ -37,6 +41,10 @@ While a flight is active, it refreshes every minute.
   regular map as you zoom in.
 - `server/` (Express): proxies AeroDataBox so the API key never reaches the
   browser. Weather is fetched client-side from Open-Meteo (no key required).
+- The map canvas is transparent past the globe's edge, so the void behind it
+  is just the page background: a plain color by default, or a tiled SVG
+  starfield in dark mode that's offset from the globe's own drag/zoom events
+  to drift with it. The choice is stored in `localStorage`.
 - When a flight has no live ADS-B position reported, the plane's position is
   estimated by interpolating along the great-circle route based on elapsed
   time between scheduled/revised departure and arrival.
