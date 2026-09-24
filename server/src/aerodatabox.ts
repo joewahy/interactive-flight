@@ -64,6 +64,7 @@ interface RawFlight {
     lat: number;
     lon: number;
     altitude?: { feet: number };
+    pressureAltitude?: { feet: number };
     groundSpeed?: { kt: number };
     trueTrack?: { deg: number };
     vsiFpm?: number | null;
@@ -278,7 +279,10 @@ function normalizeFlight(f: RawFlight): FlightResult {
       ? {
           lat: f.location.lat,
           lon: f.location.lon,
-          altitudeFt: f.location.altitude?.feet ?? null,
+          // AeroDataBox's `altitude` (geometric) comes back as a hard 0 rather than
+          // null when unpopulated, which reads as "on the ground" for an airborne
+          // flight; `pressureAltitude` is populated reliably, so prefer it.
+          altitudeFt: f.location.pressureAltitude?.feet ?? f.location.altitude?.feet ?? null,
           groundSpeedKt: f.location.groundSpeed?.kt ?? null,
           trackDeg: f.location.trueTrack?.deg ?? null,
           verticalSpeedFpm: f.location.vsiFpm ?? null,
