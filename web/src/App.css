@@ -88,15 +88,31 @@
 }
 
 .overlay.top h1 {
-  font-size: 18px;
+  font-family: var(--font-display);
+  font-size: 19px;
   font-weight: 700;
   margin: 0 0 12px;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.01em;
 }
 
-.search-bar {
+.search-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.search-row {
   display: flex;
   gap: 8px;
+}
+
+.field-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--bad);
 }
 
 .search-bar input {
@@ -108,6 +124,7 @@
   background: #fff;
   color: var(--text);
   font: inherit;
+  font-family: var(--font-data);
   font-size: 16px;
   letter-spacing: 0.02em;
   outline: none;
@@ -122,8 +139,13 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+.search-bar input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
 .search-bar input::placeholder {
   color: var(--text-dim);
+  font-family: var(--font);
   letter-spacing: 0;
 }
 
@@ -254,6 +276,7 @@
 
 .details-top h2 {
   margin: 4px 0 0;
+  font-family: var(--font-data);
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -268,6 +291,7 @@
 .details-airline {
   display: block;
   margin-top: 2px;
+  font-family: var(--font);
   font-size: 14px;
   font-weight: 400;
   letter-spacing: 0;
@@ -342,10 +366,12 @@
 /* The largest text in the panel: this is the one-glance answer everything else supports. */
 .status-headline {
   margin: 0;
-  font-size: 26px;
+  font-family: var(--font-display);
+  font-size: 24px;
   font-weight: 700;
   line-height: 1.2;
   color: var(--tone);
+  text-wrap: balance;
 }
 
 .status-detail {
@@ -388,6 +414,7 @@
 }
 
 .route-code {
+  font-family: var(--font-data);
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -420,6 +447,7 @@
 }
 
 .route-span-value {
+  font-family: var(--font-data);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -483,8 +511,9 @@
 
 /* Keeps the airport identifiable after the route header above has scrolled out of view. */
 .route-times-code {
+  font-family: var(--font-data);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -501,15 +530,17 @@
 }
 
 .stat-label {
-  font-size: 12px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 400;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .stat-value {
-  font-size: 20px;
+  font-family: var(--font-data);
+  font-size: 19px;
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
@@ -517,7 +548,17 @@
 }
 
 .stat-value.muted {
-  font-weight: 500;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* The "+1" day marker after a time, set small and raised like a boarding pass's. */
+.day-offset {
+  position: relative;
+  top: -0.55em;
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-dim);
 }
 
@@ -599,8 +640,9 @@
 }
 
 .route-progress-km {
+  font-family: var(--font-data);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -615,8 +657,9 @@
 
 .section h3 {
   margin: 0 0 12px;
-  font-size: 12px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-dim);
@@ -649,7 +692,7 @@
   margin: 0 0 16px;
 }
 
-.details-top + .aircraft-photo {
+.details-peek > .aircraft-photo {
   margin: 16px 0 0;
 }
 
@@ -685,7 +728,8 @@
 }
 
 .aircraft-reg {
-  font-weight: 500;
+  font-family: var(--font-data);
+  font-weight: 400;
   color: var(--text-dim);
   letter-spacing: 0.02em;
 }
@@ -712,26 +756,44 @@
 
 /* ---------- Phone: bottom sheet ---------- */
 
+/* Always its expanded size, which stops just short of the search card (--map-inset-top is
+   set on .app); collapsed, it slides down until only the measured peek (--peek, set inline
+   by DetailsPanel) shows. Moving it by transform rather than resizing it keeps the slide
+   off the layout path. */
 .details-panel.sheet {
   top: auto;
   bottom: 0;
   left: 0;
   width: 100%;
-  height: auto;
-  max-height: calc(100dvh - 150px);
+  height: calc(100dvh - var(--map-inset-top, 150px) - 8px);
   border-left: none;
   border-top: 1px solid color-mix(in srgb, var(--tone) 45%, var(--panel-border));
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -4px 12px -4px rgba(28, 34, 48, 0.22);
   padding: 0 16px calc(24px + env(safe-area-inset-bottom));
-  transition: max-height 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* A close approximation of the peek's real height, so the sheet doesn't flash full content
-   before DetailsPanel's ResizeObserver measures it and sets the exact value inline. */
+/* 220px is a close approximation of the peek, so the sheet doesn't flash its full content
+   before the peek is measured. */
 .details-panel.sheet.collapsed {
   overflow: hidden;
-  max-height: 220px;
+  transform: translateY(calc(100% - var(--peek, 220px) - env(safe-area-inset-bottom)));
+}
+
+.details-panel.sheet .details-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 -16px;
+  padding: 0 16px;
+  background: var(--panel-bg);
+}
+
+/* The expanded sheet covers the map, so the map's own controls (and its credit line) are
+   hidden with it rather than left underneath. */
+.app:has(.details-panel.sheet:not(.collapsed)) .flight-map :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-top-right) {
+  visibility: hidden;
 }
 
 .details-panel.sheet .status-block {
@@ -804,6 +866,23 @@
   /* The search card spans the top edge on phones; sit just below it. */
   .flight-map .maplibregl-ctrl-top-right {
     top: var(--map-inset-top, 0px);
+  }
+}
+
+/* Touch screens get full-size targets for the map's buttons, the leg picker and the sheet
+   handle, which are drawn smaller for a mouse. */
+@media (pointer: coarse) {
+  .flight-map .maplibregl-ctrl-group button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .flight-picker button {
+    min-height: 44px;
+  }
+
+  .sheet-handle {
+    height: 40px;
   }
 }
 

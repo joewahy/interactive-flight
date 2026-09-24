@@ -4,7 +4,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
 import type { FlightResult } from "../types";
 import { getFlightPosition } from "../flightPosition";
-import { greatCircleInterpolate, type LatLon } from "../geo";
+import { flightPhase } from "../flightStatus";
+import { angularDistance, destinationPoint, greatCircleInterpolate, type LatLon } from "../geo";
 import { planeIconSvg } from "../planeIcon";
 
 // CARTO's free, no-key-required vector basemap. Its own tiles already carry
@@ -86,13 +87,43 @@ class CenterOnPlaneControl implements IControl {
   }
 }
 
-interface RouteFeatureCollection {
-  type: "FeatureCollection";
-  features: [{ type: "Feature"; properties: Record<string, never>; geometry: { type: "LineString"; coordinates: [number, number][] } }];
+/** "flown" is departure to the plane; "ahead" is the plane (or, with no plane, departure) to arrival. */
+type RoutePart = "flown" | "ahead";
+
+function routeData(flown: [number, number][], ahead: [number, number][]): FeatureCollection {
+  const parts: [RoutePart, [number, number][]][] = [
+    ["flown", flown],
+    ["ahead", ahead],
+  ];
+  return {
+    type: "FeatureCollection",
+    features: parts
+      .filter(([, coordinates]) => coordinates.length > 1)
+      .map(([part, coordinates]) => ({ type: "Feature", properties: { part }, geometry: { type: "LineString", coordinates } })),
+  };
 }
 
-function emptyRoute(): RouteFeatureCollection {
-  return { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } }] };
+// Closer than this (about 1 km), a route part has no length worth drawing.
+const MIN_PART_ANGLE = 1e-4;
+
+/** A zoom that shows the whole globe across most of the view's shorter side. */
+function globeOverviewZoom(container: HTMLElement): number {
+  const side = Math.min(container.clientWidth, container.clientHeight) || 600;
+  // At zoom z the globe's radius is 512 * 2^z / 2π px; aim for a diameter of ~85% of the side.
+  return Math.log2((0.425 * side * 2 * Math.PI) / 512);
+}
+
+/**
+ * The heading as drawn on screen, from projecting a point just ahead of the plane. On a
+ * globe, north only points straight up at the center of the view, so the compass heading
+ * alone would skew the icon everywhere else.
+ */
+function screenHeading(map: MaplibreMap, pos: LatLon, headingDeg: number): number {
+  const ahead = destinationPoint(pos, headingDeg, 0.002);
+  const a = map.project([pos.lon, pos.lat]);
+  const b = map.project([ahead.lon, ahead.lat]);
+  if (Math.hypot(b.x - a.x, b.y - a.y) < 0.01) return headingDeg - map.getBearing();
+  return (Math.atan2(b.x - a.x, a.y - b.y) * 180) / Math.PI;
 }
 
 /**
@@ -131,8 +162,7 @@ function buildTooltipElement(text: string): HTMLDivElement {
     color: #fff;
     padding: 2px 8px;
     border-radius: 4px;
-    font-size: 12px;
-    font-family: sans-serif;
+    font: 500 12px/1.5 var(--font);
     white-space: nowrap;
     opacity: 0;
     pointer-events: none;
@@ -171,6 +201,9 @@ function buildPlaneMarkerElement(
   size: number,
   onClick: () => void
 ): HTMLDivElement {
+  // The tooltip names where the position comes from, which is also the only key to the
+  // marker's color: blue for a position the aircraft reported, gray for one estimated
+  // from the schedule.
   // MapLibre's own Marker `rotation` option rotates the whole element it's given, which
   // would carry the tooltip around with it (upside down at a southbound heading, sideways
   // elsewhere). Only the icon should turn to show heading, so it gets its own child with
@@ -192,7 +225,7 @@ function buildPlaneMarkerElement(
   icon.innerHTML = planeIconSvg(isLive ? ACCENT : ESTIMATE);
   wrapper.appendChild(icon);
 
-  attachTooltip(wrapper, flightNumber);
+  attachTooltip(wrapper, `${flightNumber} · ${isLive ? "live position" : "estimated position"}`);
   wrapper.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
@@ -200,12 +233,30 @@ function buildPlaneMarkerElement(
   return wrapper;
 }
 
+type Insets = { top: number; right: number; bottom: number };
+
+// How long after a framing starts that a change in the overlays' size re-aims it.
+const REFRAME_WINDOW_MS = 1000;
+
+function fitRoute(map: MaplibreMap, bounds: LngLatBounds, insets: Insets) {
+  map.fitBounds(bounds, {
+    padding: {
+      top: Math.max(80, insets.top + 32),
+      bottom: 80 + insets.bottom,
+      left: 80,
+      right: 80 + insets.right,
+    },
+    maxZoom: 6,
+    duration: 1200,
+  });
+}
+
 interface Props {
   flight: FlightResult | null;
   /** Changes on a timer so an estimated (non-live) position keeps advancing between fetches. */
   clockMs: number;
   /** Space covered by the search card (top), details panel (right) or phone sheet (bottom), kept clear when framing the route. */
-  insets: { top: number; right: number; bottom: number };
+  insets: Insets;
   /** Changes on each new search or pick; the route is framed once per key rather than per refresh. */
   framingKey: string;
   onMarkerClick: () => void;
@@ -222,14 +273,16 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
   // refresh doesn't drop an open hover tooltip.
   const planeMarkerKeyRef = useRef<string | null>(null);
   const hasFramedFlight = useRef<string | null>(null);
+  const lastFramingRef = useRef<{ bounds: LngLatBounds; at: number } | null>(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
   const insetsRef = useRef(insets);
   insetsRef.current = insets;
   const framingKeyRef = useRef(framingKey);
   framingKeyRef.current = framingKey;
-  // Current plane position, for the center-on-plane control.
-  const planePositionRef = useRef<{ lon: number; lat: number } | null>(null);
+  // Current plane position and compass heading, for the center-on-plane control and for
+  // re-aiming the icon as the globe turns.
+  const planeRef = useRef<{ lon: number; lat: number; headingDeg: number } | null>(null);
   const centerControlRef = useRef<CenterOnPlaneControl | null>(null);
 
   useEffect(() => {
@@ -238,17 +291,20 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     const map = new MaplibreMap({
       container: containerRef.current,
       style: MAP_STYLE_URL,
-      center: [10, 20],
-      zoom: 1.4,
+      center: [10, 25],
+      zoom: globeOverviewZoom(containerRef.current),
       attributionControl: false,
     });
+    // A globe at world scale, so a long-haul route curves the way it's really flown;
+    // MapLibre flattens it into the regular map as you zoom in, on the same tiles.
+    map.on("style.load", () => map.setProjection({ type: "globe" }));
     // Bottom-left, not MapLibre's default right side, which the details panel covers.
     // On phones the sheet covers the bottom instead; App.css lifts this corner above it.
     map.addControl(new NavigationControl({ showCompass: false }), "bottom-left");
     map.addControl(new AttributionControl({ compact: true }), "bottom-left");
     // App.css moves this corner clear of the details panel (desktop) or search card (phones).
     const centerControl = new CenterOnPlaneControl(() => {
-      const pos = planePositionRef.current;
+      const pos = planeRef.current;
       if (!pos) return;
       // An offset rather than `padding`, which MapLibre would keep applying to every later camera move.
       const { top, right, bottom } = insetsRef.current;
@@ -260,22 +316,37 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
 
     // Continuous, not zoomend-only, so the icon grows smoothly as the gesture happens.
     map.on("zoom", () => applyPlaneIconSize(planeMarkerRef.current, map.getZoom()));
+    map.on("move", () => {
+      const plane = planeRef.current;
+      const icon = planeMarkerRef.current?.getElement().firstElementChild as HTMLElement | null | undefined;
+      if (plane && icon) icon.style.transform = `rotate(${screenHeading(map, plane, plane.headingDeg)}deg)`;
+    });
 
     map.on("load", () => {
-      map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: emptyRoute() as FeatureCollection });
+      map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: routeData([], []) });
       map.addLayer({
         id: `${ROUTE_SOURCE_ID}-casing`,
         type: "line",
         source: ROUTE_SOURCE_ID,
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 },
+        paint: { "line-color": "#ffffff", "line-width": ["match", ["get", "part"], "flown", 7, 5], "line-opacity": 0.9 },
       });
+      // The rest of the route: dashed and lighter, the usual mark for a path not yet taken.
       map.addLayer({
-        id: `${ROUTE_SOURCE_ID}-line`,
+        id: `${ROUTE_SOURCE_ID}-ahead`,
         type: "line",
         source: ROUTE_SOURCE_ID,
+        filter: ["==", ["get", "part"], "ahead"],
+        layout: { "line-cap": "butt", "line-join": "round" },
+        paint: { "line-color": ACCENT, "line-width": 2, "line-opacity": 0.75, "line-dasharray": [2, 2] },
+      });
+      map.addLayer({
+        id: `${ROUTE_SOURCE_ID}-flown`,
+        type: "line",
+        source: ROUTE_SOURCE_ID,
+        filter: ["==", ["get", "part"], "flown"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": ACCENT, "line-width": 2.5, "line-dasharray": [2, 1.5] },
+        paint: { "line-color": ACCENT, "line-width": 3 },
       });
       loadedRef.current = true;
     });
@@ -303,61 +374,62 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     const routeSource = map.getSource(ROUTE_SOURCE_ID) as GeoJSONSource | undefined;
     if (!flight) {
       removePlaneMarker();
-      routeSource?.setData(emptyRoute() as FeatureCollection);
+      routeSource?.setData(routeData([], []));
       hasFramedFlight.current = null;
-      planePositionRef.current = null;
+      planeRef.current = null;
       centerControlRef.current?.setEnabled(false);
       return;
     }
 
     const dep = flight.departure.airport;
     const arr = flight.arrival.airport;
-    const bounds = new LngLatBounds();
+    const depPoint = dep.lat !== null && dep.lon !== null ? { lat: dep.lat, lon: dep.lon } : null;
+    const arrPoint = arr.lat !== null && arr.lon !== null ? { lat: arr.lat, lon: arr.lon } : null;
 
-    if (dep.lat !== null && dep.lon !== null) {
-      const marker = new Marker({ element: buildAirportMarkerElement(ACCENT, dep.iata ?? dep.icao ?? dep.name) })
-        .setLngLat([dep.lon, dep.lat])
+    if (depPoint) {
+      const marker = new Marker({ element: buildAirportMarkerElement(ACCENT, `${dep.iata ?? dep.icao ?? dep.name} · departure`) })
+        .setLngLat([depPoint.lon, depPoint.lat])
         .addTo(map);
       airportMarkersRef.current.push(marker);
-      bounds.extend([dep.lon, dep.lat]);
     }
-    if (arr.lat !== null && arr.lon !== null) {
-      const marker = new Marker({ element: buildAirportMarkerElement(INK, arr.iata ?? arr.icao ?? arr.name) })
-        .setLngLat([arr.lon, arr.lat])
+    if (arrPoint) {
+      const marker = new Marker({ element: buildAirportMarkerElement(INK, `${arr.iata ?? arr.icao ?? arr.name} · arrival`) })
+        .setLngLat([arrPoint.lon, arrPoint.lat])
         .addTo(map);
       airportMarkersRef.current.push(marker);
-      bounds.extend([arr.lon, arr.lat]);
     }
 
     const position = getFlightPosition(flight);
-    planePositionRef.current = position ? { lon: position.lon, lat: position.lat } : null;
+    planeRef.current = position ? { lon: position.lon, lat: position.lat, headingDeg: position.headingDeg } : null;
     centerControlRef.current?.setEnabled(position !== null);
 
-    // Only the flown portion (departure through the current position) is drawn, not
-    // the rest of the route to arrival — the plane hasn't flown that yet.
-    if (dep.lat !== null && dep.lon !== null && position) {
-      const coords = buildRouteCoordinates([{ lat: dep.lat, lon: dep.lon }, { lat: position.lat, lon: position.lon }]);
-      routeSource?.setData({
-        type: "FeatureCollection",
-        features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } }],
-      } as FeatureCollection);
-    } else {
-      routeSource?.setData(emptyRoute() as FeatureCollection);
+    // The whole route, split at the plane: solid behind it, dashed ahead of it. Built as one
+    // line so both parts share the same antimeridian unwrapping.
+    let flown: [number, number][] = [];
+    let ahead: [number, number][] = [];
+    if (depPoint && arrPoint && position) {
+      const coords = buildRouteCoordinates([depPoint, position, arrPoint]);
+      if (angularDistance(depPoint, position) > MIN_PART_ANGLE) flown = coords.slice(0, ROUTE_SAMPLE_POINTS + 1);
+      if (angularDistance(position, arrPoint) > MIN_PART_ANGLE) ahead = coords.slice(ROUTE_SAMPLE_POINTS);
+    } else if (depPoint && arrPoint) {
+      // Canceled or diverted: no plane on the route, but it still shows where it was going.
+      ahead = buildRouteCoordinates([depPoint, arrPoint]);
     }
+    routeSource?.setData(routeData(flown, ahead));
+
     const planeMarkerKey = position ? `${flight.number}|${position.isLive}` : null;
     if (planeMarkerKey === null || planeMarkerKey !== planeMarkerKeyRef.current) removePlaneMarker();
 
     if (position && planeMarkerRef.current) {
       planeMarkerRef.current.setLngLat([position.lon, position.lat]);
       const icon = planeMarkerRef.current.getElement().firstElementChild as HTMLElement | null;
-      if (icon) icon.style.transform = `rotate(${position.headingDeg}deg)`;
-      bounds.extend([position.lon, position.lat]);
+      if (icon) icon.style.transform = `rotate(${screenHeading(map, position, position.headingDeg)}deg)`;
     } else if (position) {
       const marker = new Marker({
         element: buildPlaneMarkerElement(
           flight.number,
           position.isLive,
-          position.headingDeg,
+          screenHeading(map, position, position.headingDeg),
           planeIconSizeForZoom(map.getZoom()),
           () => onMarkerClickRef.current()
         ),
@@ -366,24 +438,40 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
         .addTo(map);
       planeMarkerRef.current = marker;
       planeMarkerKeyRef.current = planeMarkerKey;
-      bounds.extend([position.lon, position.lat]);
+    }
+
+    // In the air, frame the plane and what's still ahead of it; before takeoff or after
+    // landing, the whole route. The sampled line, not just its ends, so a route that
+    // bows toward the pole isn't cut off.
+    const framed =
+      flightPhase(flight) === "airborne" && position
+        ? ahead.length > 1
+          ? ahead
+          : [[position.lon, position.lat] as [number, number]]
+        : [...flown, ...ahead];
+    const bounds = new LngLatBounds();
+    framed.forEach((coord) => bounds.extend(coord));
+    if (bounds.isEmpty()) {
+      [depPoint, arrPoint, position].forEach((point) => point && bounds.extend([point.lon, point.lat]));
     }
 
     const frameId = `${framingKeyRef.current}|${flight.number}|${flight.departure.scheduledUtc ?? ""}`;
     if (hasFramedFlight.current !== frameId && !bounds.isEmpty()) {
       hasFramedFlight.current = frameId;
-      map.fitBounds(bounds, {
-        padding: {
-          top: Math.max(80, insetsRef.current.top + 32),
-          bottom: 80 + insetsRef.current.bottom,
-          left: 80,
-          right: 80 + insetsRef.current.right,
-        },
-        maxZoom: 6,
-        duration: 1200,
-      });
+      lastFramingRef.current = { bounds, at: Date.now() };
+      fitRoute(map, bounds, insetsRef.current);
     }
   }, [flight, clockMs]);
+
+  // The overlays settle a render after the results arrive (the search card grows to hold
+  // the leg picker, the phone sheet measures its peek), so a framing that just started is
+  // re-aimed at the settled insets rather than leaving the plane under the search card.
+  useEffect(() => {
+    const map = mapRef.current;
+    const last = lastFramingRef.current;
+    if (!map || !last || Date.now() - last.at > REFRAME_WINDOW_MS) return;
+    fitRoute(map, last.bounds, { top: insets.top, right: insets.right, bottom: insets.bottom });
+  }, [insets.top, insets.right, insets.bottom]);
 
   return (
     <div className="flight-map">

@@ -37,6 +37,26 @@ export function greatCircleInterpolate(start: LatLon, end: LatLon, f: number): L
   return { lat: toDeg(phi), lon: toDeg(lambda) };
 }
 
+/** Great-circle (haversine) angle between two coordinates, in radians. */
+export function angularDistance(start: LatLon, end: LatLon): number {
+  const deltaPhi = toRad(end.lat - start.lat);
+  const deltaLambda = toRad(end.lon - start.lon);
+  const a =
+    Math.sin(deltaPhi / 2) ** 2 + Math.cos(toRad(start.lat)) * Math.cos(toRad(end.lat)) * Math.sin(deltaLambda / 2) ** 2;
+  return 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** The point reached from start along a compass bearing (degrees) after an angular distance (radians). */
+export function destinationPoint(start: LatLon, bearingDeg: number, angle: number): LatLon {
+  const phi1 = toRad(start.lat);
+  const lambda1 = toRad(start.lon);
+  const theta = toRad(bearingDeg);
+  const phi2 = Math.asin(Math.sin(phi1) * Math.cos(angle) + Math.cos(phi1) * Math.sin(angle) * Math.cos(theta));
+  const lambda2 =
+    lambda1 + Math.atan2(Math.sin(theta) * Math.sin(angle) * Math.cos(phi1), Math.cos(angle) - Math.sin(phi1) * Math.sin(phi2));
+  return { lat: toDeg(phi2), lon: toDeg(lambda2) };
+}
+
 /** Initial compass bearing (degrees, 0-360) from start to end. */
 export function initialBearing(start: LatLon, end: LatLon): number {
   const phi1 = toRad(start.lat);
