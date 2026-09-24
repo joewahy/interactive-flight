@@ -37,7 +37,7 @@ function planeIconSizeForZoom(zoom: number): number {
 function applyPlaneIconSize(marker: Marker | null, zoom: number) {
   if (!marker) return;
   const wrapper = marker.getElement();
-  const icon = wrapper.firstElementChild as HTMLElement | null;
+  const icon = wrapper.querySelector<HTMLElement>(".plane-marker-icon");
   if (!icon) return;
   const size = `${planeIconSizeForZoom(zoom)}px`;
   wrapper.style.width = size;
@@ -266,13 +266,22 @@ function buildPlaneMarkerElement(
   // elsewhere). Only the icon should turn to show heading, so it gets its own child with
   // the rotation applied directly, sitting next to an always-upright tooltip.
   const wrapper = document.createElement("div");
+  wrapper.className = "plane-marker";
   wrapper.style.cssText = `
     width: ${size}px;
     height: ${size}px;
     cursor: pointer;
   `;
 
+  // The hover scale lives on its own element rather than the icon: the icon's transform
+  // is overwritten on every map zoom/move to track heading, which would fight a CSS
+  // transition on the same property (and animating that continuous, frequent update
+  // would make rotation lag behind the gesture instead of tracking it instantly).
+  const scale = document.createElement("div");
+  scale.className = "plane-marker-scale";
+
   const icon = document.createElement("div");
+  icon.className = "plane-marker-icon";
   icon.style.cssText = `
     width: ${size}px;
     height: ${size}px;
@@ -280,9 +289,11 @@ function buildPlaneMarkerElement(
     filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
   `;
   icon.innerHTML = planeIconSvg(isLive ? ACCENT : ESTIMATE);
-  wrapper.appendChild(icon);
+  scale.appendChild(icon);
+  wrapper.appendChild(scale);
 
-  attachTooltip(wrapper, `${flightNumber}`);
+  const source = isLive ? "Reported by the aircraft" : "Estimated from the schedule";
+  attachTooltip(wrapper, `${flightNumber} · ${source}`);
   wrapper.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
@@ -397,7 +408,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     map.on("zoom", () => applyPlaneIconSize(planeMarkerRef.current, map.getZoom()));
     map.on("move", () => {
       const plane = planeRef.current;
-      const icon = planeMarkerRef.current?.getElement().firstElementChild as HTMLElement | null | undefined;
+      const icon = planeMarkerRef.current?.getElement().querySelector<HTMLElement>(".plane-marker-icon");
       if (plane && icon) icon.style.transform = `rotate(${screenHeading(map, plane, plane.headingDeg)}deg)`;
     });
     map.on("move", () => {
@@ -527,7 +538,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
 
     if (position && planeMarkerRef.current) {
       planeMarkerRef.current.setLngLat([position.lon, position.lat]);
-      const icon = planeMarkerRef.current.getElement().firstElementChild as HTMLElement | null;
+      const icon = planeMarkerRef.current.getElement().querySelector<HTMLElement>(".plane-marker-icon");
       if (icon) icon.style.transform = `rotate(${screenHeading(map, position, position.headingDeg)}deg)`;
     } else if (position) {
       const marker = new Marker({

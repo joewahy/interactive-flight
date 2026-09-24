@@ -60,6 +60,21 @@ body[data-void-theme="dark"] .map-loading {
   color: var(--accent-strong);
 }
 
+.plane-marker-scale {
+  width: 100%;
+  height: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .plane-marker-scale {
+    transition: transform 0.15s ease;
+  }
+
+  .plane-marker:hover .plane-marker-scale {
+    transform: scale(1.12);
+  }
+}
+
 .flight-map .maplibregl-ctrl-group {
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow);
@@ -914,6 +929,10 @@ body[data-void-theme="dark"] .map-loading {
   }
 
   .sheet-handle svg {
+    transition: none;
+  }
+
+  .plane-marker-scale {
     transition: none;
   }
 }
