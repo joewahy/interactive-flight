@@ -85,6 +85,13 @@ function compassPoint(deg: number): string {
 
 type AircraftDetails = NonNullable<NonNullable<FlightResult["aircraft"]>["details"]>;
 
+/** "0.5 years old" reads oddly for a just-delivered jet, so anything under a year shows in months instead. */
+function aircraftAge(ageYears: number): string {
+  if (ageYears >= 1) return `${ageYears.toFixed(1)} years old`;
+  const months = Math.max(1, Math.round(ageYears * 12));
+  return `${months} month${months === 1 ? "" : "s"} old`;
+}
+
 /** e.g. "12.5 years old · 102 seats · 2 jet engines", skipping whatever's unknown. */
 function aircraftFacts(details: AircraftDetails): string | null {
   const engines =
@@ -92,7 +99,7 @@ function aircraftFacts(details: AircraftDetails): string | null {
       ? `${details.numEngines} ${details.engineType ? `${details.engineType.toLowerCase()} ` : ""}engine${details.numEngines === 1 ? "" : "s"}`
       : null;
   const parts = [
-    details.ageYears !== null ? `${details.ageYears.toFixed(1)} years old` : null,
+    details.ageYears !== null ? aircraftAge(details.ageYears) : null,
     details.numSeats !== null ? `${details.numSeats} seats` : null,
     engines,
   ].filter((p): p is string => p !== null);
@@ -446,7 +453,7 @@ function WeatherLine({ label, weather, onRetry }: { label: string; weather: Weat
     return (
       <p className="weather-line">
         {label}: weather couldn't be loaded.{" "}
-        <button type="button" className="text-button" onClick={onRetry}>
+        <button type="button" className="text-button" onClick={onRetry} aria-label={`Try again: ${label} weather`}>
           Try again
         </button>
       </p>
