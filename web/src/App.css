@@ -759,6 +759,7 @@ body[data-void-theme="dark"] .map-loading {
 .aircraft-photo figcaption a {
   color: inherit;
   text-underline-offset: 2px;
+  transition: color 0.15s ease;
 }
 
 .aircraft-photo figcaption a:hover {
