@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { AttributionControl, type IControl, Map as MaplibreMap, Marker, NavigationControl, LngLatBounds, type GeoJSONSource } from "maplibre-gl";
+import { AttributionControl, type IControl, Map as MaplibreMap, Marker, NavigationControl, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
 import type { FlightResult } from "../types";
@@ -377,15 +377,66 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-function fitRoute(map: MaplibreMap, bounds: LngLatBounds, insets: Insets) {
-  map.fitBounds(bounds, {
-    padding: {
-      top: Math.max(80, insets.top + 32),
-      bottom: 80 + insets.bottom,
-      left: 80,
-      right: 80 + insets.right,
-    },
-    maxZoom: 6,
+type Padding = { top: number; right: number; bottom: number; left: number };
+
+/** Whether every point projects inside the padded viewport at the map's current camera. */
+function fitsInPadding(map: MaplibreMap, points: LatLon[], padding: Padding): boolean {
+  const container = map.getContainer();
+  const right = container.clientWidth - padding.right;
+  const bottom = container.clientHeight - padding.bottom;
+  return points.every(({ lon, lat }) => {
+    const { x, y } = map.project([lon, lat]);
+    return x >= padding.left && x <= right && y >= padding.top && y <= bottom;
+  });
+}
+
+/**
+ * Center and zoom that keep every point of a route on screen. Centering on the great-circle
+ * midpoint between the route's two ends always keeps both within 90° of the camera (any
+ * great-circle path spans at most 180°) — unlike a flat lng/lat bounding box (as plain
+ * `fitBounds` would use), which degenerates near the poles (all longitudes converge at
+ * lat=90) and can misjudge the center entirely for a route whose apex passes close to one.
+ * The zoom is found by bisection against the globe's own projection (`map.project`) rather
+ * than computed analytically, since the globe's perspective — and how padding shifts the
+ * on-screen position of a given center — isn't a simple closed-form function of angular
+ * distance.
+ */
+function routeCamera(map: MaplibreMap, points: LatLon[], padding: Padding): { center: LatLon; zoom: number } {
+  const start = points[0];
+  const end = points[points.length - 1];
+  const center = angularDistance(start, end) > MIN_PART_ANGLE ? greatCircleInterpolate(start, end, 0.5) : start;
+
+  const prev = { center: map.getCenter(), zoom: map.getZoom(), padding: map.getPadding(), bearing: map.getBearing() };
+  const jumpTo = (zoom: number) => map.jumpTo({ center: [center.lon, center.lat], zoom, padding, bearing: 0 });
+
+  // The map's own minimum zoom always fits (the globe shrinks toward a point at the center),
+  // so it's a safe lower bound to bisect up from regardless of how much padding there is.
+  let lo = map.getMinZoom();
+  let hi = 6;
+  for (let i = 0; i < 18; i++) {
+    const mid = (lo + hi) / 2;
+    jumpTo(mid);
+    if (fitsInPadding(map, points, padding)) lo = mid;
+    else hi = mid;
+  }
+  map.jumpTo({ center: prev.center, zoom: prev.zoom, padding: prev.padding, bearing: prev.bearing });
+
+  return { center, zoom: lo };
+}
+
+function fitRoute(map: MaplibreMap, points: LatLon[], insets: Insets) {
+  if (points.length === 0) return;
+  const padding: Padding = {
+    top: Math.max(80, insets.top + 32),
+    bottom: 80 + insets.bottom,
+    left: 80,
+    right: 80 + insets.right,
+  };
+  const fit = routeCamera(map, points, padding);
+  map.easeTo({
+    center: [fit.center.lon, fit.center.lat],
+    zoom: fit.zoom,
+    padding,
     duration: prefersReducedMotion() ? 0 : ROUTE_FIT_DURATION_MS,
   });
 }
@@ -415,7 +466,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
   // refresh doesn't drop an open hover tooltip.
   const planeMarkerKeyRef = useRef<string | null>(null);
   const hasFramedFlight = useRef<string | null>(null);
-  const lastFramingRef = useRef<{ bounds: LngLatBounds; at: number } | null>(null);
+  const lastFramingRef = useRef<{ points: LatLon[]; at: number } | null>(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
   const insetsRef = useRef(insets);
@@ -621,23 +672,23 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     // In the air, frame the plane and what's still ahead of it; before takeoff or after
     // landing, the whole route. The sampled line, not just its ends, so a route that
     // bows toward the pole isn't cut off.
-    const framed =
+    const toLatLon = ([lon, lat]: [number, number]): LatLon => ({ lat, lon });
+    const framed: LatLon[] =
       flightPhase(flight) === "airborne" && position
         ? ahead.length > 1
-          ? ahead
-          : [[position.lon, position.lat] as [number, number]]
-        : [...flown, ...ahead];
-    const bounds = new LngLatBounds();
-    framed.forEach((coord) => bounds.extend(coord));
-    if (bounds.isEmpty()) {
-      [depPoint, arrPoint, position].forEach((point) => point && bounds.extend([point.lon, point.lat]));
-    }
+          ? ahead.map(toLatLon)
+          : [{ lat: position.lat, lon: position.lon }]
+        : [...flown, ...ahead].map(toLatLon);
+    const points =
+      framed.length > 0
+        ? framed
+        : [depPoint, arrPoint, position].filter((point): point is LatLon => point !== null);
 
     const frameId = `${framingKeyRef.current}|${flight.number}|${flight.departure.scheduledUtc ?? ""}`;
-    if (hasFramedFlight.current !== frameId && !bounds.isEmpty()) {
+    if (hasFramedFlight.current !== frameId && points.length > 0) {
       hasFramedFlight.current = frameId;
-      lastFramingRef.current = { bounds, at: Date.now() };
-      fitRoute(map, bounds, insetsRef.current);
+      lastFramingRef.current = { points, at: Date.now() };
+      fitRoute(map, points, insetsRef.current);
     }
   }, [flight, clockMs]);
 
@@ -648,7 +699,7 @@ export default function FlightMap({ flight, clockMs, insets, framingKey, onMarke
     const map = mapRef.current;
     const last = lastFramingRef.current;
     if (!map || !last || Date.now() - last.at > REFRAME_WINDOW_MS) return;
-    fitRoute(map, last.bounds, { top: insets.top, right: insets.right, bottom: insets.bottom });
+    fitRoute(map, last.points, { top: insets.top, right: insets.right, bottom: insets.bottom });
   }, [insets.top, insets.right, insets.bottom]);
 
   return (
