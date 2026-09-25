@@ -98,6 +98,9 @@ class VoidThemeControl implements IControl {
   private container: HTMLDivElement | null = null;
   private button: HTMLButtonElement | null = null;
   private readonly onClick: () => void;
+  // The first setMode() just paints the initial icon; only a later one is a real toggle
+  // worth crossfading.
+  private initialized = false;
 
   constructor(onClick: () => void) {
     this.onClick = onClick;
@@ -123,11 +126,41 @@ class VoidThemeControl implements IControl {
   }
 
   setMode(mode: "light" | "dark") {
-    if (!this.button) return;
+    const button = this.button;
+    if (!button) return;
     const label = mode === "light" ? "Switch to starry background" : "Switch to light background";
-    this.button.title = label;
-    this.button.setAttribute("aria-label", label);
-    this.button.innerHTML = mode === "light" ? MOON_ICON : SUN_ICON;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    const icon = mode === "light" ? MOON_ICON : SUN_ICON;
+
+    if (!this.initialized || prefersReducedMotion()) {
+      button.innerHTML = icon;
+      this.initialized = true;
+      return;
+    }
+
+    // A swapped innerHTML with no transition reads as a glitch, not a toggle. Swap it
+    // at the midpoint of a quick out/in so the sun and moon feel like they're rotating
+    // past each other rather than popping.
+    button
+      .animate([{ opacity: 1, transform: "scale(1) rotate(0deg)" }, { opacity: 0, transform: "scale(0.6) rotate(-45deg)" }], {
+        duration: 90,
+        easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+      })
+      .finished.then(() => {
+        button.innerHTML = icon;
+        button.animate(
+          [
+            { opacity: 0, transform: "scale(0.6) rotate(45deg)" },
+            { opacity: 1, transform: "scale(1) rotate(0deg)" },
+          ],
+          { duration: 110, easing: "cubic-bezier(0.23, 1, 0.32, 1)" }
+        );
+      })
+      .catch(() => {
+        // The out-animation was interrupted (e.g. a rapid re-toggle); the icon still needs to end up right.
+        button.innerHTML = icon;
+      });
   }
 }
 
@@ -207,6 +240,12 @@ function buildRouteCoordinates(waypoints: LatLon[]): [number, number][] {
   return coords;
 }
 
+// The tooltip sits above its trigger, so it settles in from that direction: a touch of
+// scale and a couple px of translateY read as "arriving from the marker" rather than a
+// flat opacity fade.
+const TOOLTIP_HIDDEN_TRANSFORM = "translateX(-50%) translateY(2px) scale(0.94)";
+const TOOLTIP_SHOWN_TRANSFORM = "translateX(-50%) translateY(0) scale(1)";
+
 function buildTooltipElement(text: string): HTMLDivElement {
   const tooltip = document.createElement("div");
   tooltip.textContent = text;
@@ -214,7 +253,8 @@ function buildTooltipElement(text: string): HTMLDivElement {
     position: absolute;
     left: 50%;
     bottom: 130%;
-    transform: translateX(-50%);
+    transform: ${TOOLTIP_HIDDEN_TRANSFORM};
+    transform-origin: bottom center;
     background: ${INK};
     color: #fff;
     padding: 2px 8px;
@@ -223,17 +263,29 @@ function buildTooltipElement(text: string): HTMLDivElement {
     white-space: nowrap;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.15s ease;
+    transition: opacity 0.15s ease-out, transform 0.15s ease-out;
   `;
   return tooltip;
 }
 
-/** Appends a hover tooltip to `element`, shown only while the pointer is over it. */
+function showTooltip(tooltip: HTMLDivElement): void {
+  tooltip.style.opacity = "1";
+  tooltip.style.transform = TOOLTIP_SHOWN_TRANSFORM;
+}
+
+function hideTooltip(tooltip: HTMLDivElement): void {
+  tooltip.style.opacity = "0";
+  tooltip.style.transform = TOOLTIP_HIDDEN_TRANSFORM;
+}
+
+/** Appends a tooltip to `element`, shown on hover and (for focusable elements) on keyboard focus. */
 function attachTooltip(element: HTMLElement, text: string): void {
   const tooltip = buildTooltipElement(text);
   element.appendChild(tooltip);
-  element.addEventListener("mouseenter", () => (tooltip.style.opacity = "1"));
-  element.addEventListener("mouseleave", () => (tooltip.style.opacity = "0"));
+  element.addEventListener("mouseenter", () => showTooltip(tooltip));
+  element.addEventListener("mouseleave", () => hideTooltip(tooltip));
+  element.addEventListener("focus", () => showTooltip(tooltip));
+  element.addEventListener("blur", () => hideTooltip(tooltip));
 }
 
 function buildAirportMarkerElement(color: string, label: string): HTMLDivElement {
@@ -267,6 +319,8 @@ function buildPlaneMarkerElement(
   // the rotation applied directly, sitting next to an always-upright tooltip.
   const wrapper = document.createElement("div");
   wrapper.className = "plane-marker";
+  wrapper.setAttribute("role", "button");
+  wrapper.setAttribute("tabindex", "0");
   wrapper.style.cssText = `
     width: ${size}px;
     height: ${size}px;
@@ -293,8 +347,16 @@ function buildPlaneMarkerElement(
   wrapper.appendChild(scale);
 
   const source = isLive ? "Reported by the aircraft" : "Estimated from the schedule";
-  attachTooltip(wrapper, `${flightNumber} · ${source}`);
+  const label = `${flightNumber} · ${source}`;
+  wrapper.setAttribute("aria-label", label);
+  attachTooltip(wrapper, label);
   wrapper.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+  wrapper.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
     event.stopPropagation();
     onClick();
   });
