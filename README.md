@@ -1,5 +1,3 @@
-# Flightpath
-
 ![Searching for a flight, watching it live on the globe, and opening its details panel](docs/demo.gif)
 
 Enter a flight number, see it tracked live on a map: the flown portion of its
